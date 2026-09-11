@@ -1,0 +1,62 @@
+{
+  "name": "egit-nightly",
+  "priority": 50,
+  "labels": { "branch": "master", "trigger": "nightly" },
+
+  "defaults": {
+    "pool": "linux-container",
+    "timeout": "10m",
+    "retries": 0,
+    "requires": { "os": "linux", "display": "xvfb" },
+    "env": { "FIXTURE_SECONDS": "20", "FIXTURE_TESTS": "24" }
+  },
+
+  "suites": [
+    {
+      "name": "org.eclipse.jgit.test",
+      "env": { "FIXTURE_TESTS": "40", "FIXTURE_SECONDS": "25" }
+    },
+    {
+      "name": "org.eclipse.jgit.pgm.test",
+      "env": { "FIXTURE_TESTS": "18", "FIXTURE_SECONDS": "15" }
+    },
+    {
+      "name": "org.eclipse.egit.core.test",
+      "requires": { "rcp_version": "4.30" },
+      "env": { "FIXTURE_TESTS": "30", "FIXTURE_SECONDS": "20" }
+    },
+    {
+      "name": "org.eclipse.egit.ui.test",
+      "requires": { "rcp_version": "4.30" },
+      "timeout": "15m",
+      "env": { "FIXTURE_TESTS": "26", "FIXTURE_FAIL": "2", "FIXTURE_SECONDS": "30" }
+    },
+    {
+      "name": "org.eclipse.egit.ui.smartimport.test",
+      "pool": "linux-process",
+      "env": { "FIXTURE_TESTS": "12", "FIXTURE_SECONDS": "18" }
+    },
+    {
+      "name": "org.eclipse.egit.gitflow.test",
+      "pool": "linux-process",
+      "env": { "FIXTURE_TESTS": "16", "FIXTURE_SECONDS": "22" }
+    },
+    {
+      "name": "org.eclipse.egit.mylyn.ui.test",
+      "pool": "linux-process",
+      "retries": 2,
+      "env": { "FIXTURE_TESTS": "14", "FIXTURE_FAIL": "3", "FIXTURE_FLAKY": "1", "FIXTURE_SECONDS": "12" }
+    },
+    {
+      "name": "org.eclipse.egit.core.legacy.test",
+      "pool": "linux-process",
+      "requires": { "rcp_version": "4.26" },
+      "env": { "FIXTURE_TESTS": "10", "FIXTURE_SECONDS": "14" }
+    },
+    {
+      "name": "org.eclipse.egit.target.test",
+      "retries": 1,
+      "env": { "FIXTURE_CRASH": "1" }
+    }
+  ]
+}

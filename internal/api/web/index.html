@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Distributed Test Platform</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#9881;</text></svg>">
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#fff; --ink:#17191c; --muted:#6b7280; --line:#e3e6ea;
+    --accent:#3b5bdb; --pass:#12855a; --fail:#c92a2a; --warn:#b7791f; --run:#1c7ed6;
+    --idle:#9aa2ad; --chip:#eef0f3;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{ --bg:#101215; --panel:#181b20; --ink:#e6e8ea; --muted:#98a1ad; --line:#272b32;
+      --accent:#748ffc; --pass:#38d9a9; --fail:#ff8787; --warn:#ffd43b; --run:#4dabf7;
+      --idle:#5c646f; --chip:#22262d; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px}
+  header{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid var(--line);
+    background:var(--panel);position:sticky;top:0;z-index:5}
+  header h1{font-size:15px;margin:0;font-weight:650;letter-spacing:-.01em}
+  header .sp{flex:1}
+  main{padding:20px 22px;max-width:1400px;margin:0 auto}
+  section{margin-bottom:28px}
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 10px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px}
+  .pools{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px}
+  .pool{padding:14px 16px}
+  .pool .top{display:flex;align-items:baseline;gap:8px;margin-bottom:2px}
+  .pool .name{font-weight:650}
+  .pool .desc{color:var(--muted);font-size:12.5px;margin-bottom:10px}
+  .node{display:grid;grid-template-columns:1fr auto;gap:4px 10px;padding:7px 0;border-top:1px solid var(--line)}
+  .node .nm{display:flex;align-items:center;gap:6px}
+  .slots{grid-column:1/-1;display:flex;gap:3px;margin-top:2px}
+  .slot{height:7px;flex:1;border-radius:2px;background:var(--chip)}
+  .slot.on{background:var(--run)}
+  .slot.off{background:var(--chip)}
+  .chip{display:inline-block;padding:1px 7px;border-radius:999px;background:var(--chip);
+    color:var(--muted);font-size:11px;font-weight:600;letter-spacing:.02em}
+  .dot{width:7px;height:7px;border-radius:50%;display:inline-block;background:var(--idle)}
+  .dot.ready{background:var(--pass)} .dot.down{background:var(--fail)}
+  table{width:100%;border-collapse:collapse}
+  th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);
+    font-weight:600;padding:8px 12px;border-bottom:1px solid var(--line)}
+  td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+  tr.reg{cursor:pointer} tr.reg:hover td{background:var(--chip)}
+  .st{font-weight:650;font-size:12px}
+  .st.passed,.st.ok{color:var(--pass)} .st.failed{color:var(--fail)}
+  .st.errored,.st.timeout{color:var(--warn)} .st.running,.st.dispatched{color:var(--run)}
+  .st.queued,.st.pending,.st.canceled{color:var(--muted)}
+  .bar{height:6px;border-radius:3px;background:var(--chip);overflow:hidden;display:flex;min-width:90px}
+  .bar i{display:block;height:100%}
+  .bar .p{background:var(--pass)} .bar .f{background:var(--fail)} .bar .r{background:var(--run)}
+  .detail{padding:0 12px 14px}
+  .suite{display:grid;grid-template-columns:minmax(230px,2fr) 90px 110px 140px 90px 1fr;
+    gap:10px;align-items:center;padding:8px 4px;border-bottom:1px solid var(--line);font-size:13px}
+  .suite:hover{background:var(--chip)}
+  .suite .nm{cursor:pointer;font-weight:550}
+  .muted{color:var(--muted)}
+  .empty{padding:26px;text-align:center;color:var(--muted)}
+  .fails{margin:6px 0 12px;padding:10px 12px;background:var(--chip);border-radius:8px}
+  .fail-case{padding:6px 0;border-bottom:1px solid var(--line)}
+  .fail-case:last-child{border-bottom:0}
+  .fail-case .t{color:var(--fail);font-weight:600}
+  pre{margin:6px 0 0;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow:auto;
+    color:var(--muted);font-size:11.5px}
+  a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+  .arts{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+  .arts a{background:var(--chip);padding:3px 8px;border-radius:6px;font-size:11.5px}
+  .attempts{display:flex;gap:5px;align-items:center}
+  .att{width:16px;height:16px;border-radius:4px;font-size:10px;display:grid;place-items:center;
+    color:#fff;font-weight:700}
+  .att.passed{background:var(--pass)} .att.failed{background:var(--fail)}
+  .att.errored,.att.timeout{background:var(--warn)} .att.running,.att.dispatched{background:var(--run)}
+  .att.queued,.att.canceled{background:var(--idle)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Distributed Test Platform</h1>
+  <span class="chip" id="backend">…</span>
+  <span class="sp"></span>
+  <span class="muted mono" id="clock"></span>
+</header>
+<main>
+  <section>
+    <h2>Pools &amp; slots</h2>
+    <div class="pools" id="pools"></div>
+  </section>
+  <section>
+    <h2>Regressions</h2>
+    <div class="card"><table>
+      <thead><tr>
+        <th style="width:34%">Regression</th><th>State</th><th>Suites</th>
+        <th style="width:18%">Tests</th><th>Started</th><th>Duration</th><th>Artifacts</th>
+      </tr></thead>
+      <tbody id="regs"></tbody>
+    </table><div class="empty" id="empty" hidden>No regressions submitted yet.</div></div>
+  </section>
+</main>
+<script>
+const open = new Set(), openSuites = new Set();
+let revision = 0, state = null;
+
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const dur = s => { if(!s || s<0) return "—";
+  if (s<60) return s.toFixed(1)+"s";
+  const m=Math.floor(s/60), r=Math.round(s%60); return m<60 ? `${m}m ${r}s` : `${Math.floor(m/60)}h ${m%60}m`; };
+const ago = t => { if(!t) return "—"; const d=(Date.now()-new Date(t))/1000;
+  return d<60 ? Math.round(d)+"s ago" : d<3600 ? Math.round(d/60)+"m ago" : new Date(t).toLocaleString(); };
+
+async function poll(){
+  try{
+    const r = await fetch(`/api/v1/overview?since=${revision}`);
+    const d = await r.json();
+    revision = d.revision; state = d; render(d);
+  }catch(e){ await new Promise(r=>setTimeout(r,2000)); }
+  poll();
+}
+
+function render(d){
+  document.getElementById("clock").textContent = new Date().toLocaleTimeString();
+  const b = document.getElementById("backend");
+  b.textContent = `backend: ${d.backend}${d.backend_state==="ok"?"":" ⚠"}`;
+  b.title = d.backend_error || "";
+
+  document.getElementById("pools").innerHTML = (d.pools||[]).map(p=>{
+    const nodes = (p.nodes||[]).map(n=>{
+      const slots = Array.from({length:n.slots},(_,i)=>
+        `<span class="slot ${i < n.used ? "on":"off"}"></span>`).join("");
+      const meta = Object.entries(n.meta||{}).filter(([k])=>k!=="slots")
+        .map(([k,v])=>`${k}=${v}`).join(" ");
+      return `<div class="node">
+        <div class="nm"><span class="dot ${n.ready?"ready":"down"}"></span>
+          <span class="mono">${esc(n.name)}</span></div>
+        <div class="muted mono">${n.used}/${n.slots}</div>
+        <div class="slots">${slots}</div>
+        ${meta?`<div class="muted mono" style="grid-column:1/-1;font-size:11px">${esc(meta)}</div>`:""}
+        ${n.running&&n.running.length?`<div class="muted" style="grid-column:1/-1;font-size:11.5px">▸ ${
+          n.running.map(s=>esc(s.split(".").pop())).join(", ")}</div>`:""}
+      </div>`;
+    }).join("") || `<div class="muted" style="padding:10px 0">No nodes registered in this pool.</div>`;
+    return `<div class="card pool">
+      <div class="top"><span class="name">${esc(p.name)}</span>
+        <span class="chip">${esc(p.runtime)} · ${esc(p.driver)}</span>
+        <span class="sp" style="flex:1"></span>
+        <span class="mono muted">${p.used}/${p.slots} slots${p.queued?` · ${p.queued} queued`:""}</span></div>
+      <div class="desc">${esc(p.description||"")} <span class="mono">${p.slot.cpu}MHz/${p.slot.memory}MB per slot</span></div>
+      ${p.error?`<div class="st failed" style="font-size:12px">${esc(p.error)}</div>`:""}
+      ${nodes}</div>`;
+  }).join("") || `<div class="card empty">No pools configured.</div>`;
+
+  const regs = d.regressions||[];
+  document.getElementById("empty").hidden = regs.length>0;
+  document.getElementById("regs").innerHTML = regs.map(r=>{
+    const t=r.totals, total=Math.max(t.tests,1);
+    const bar = `<div class="bar">
+      <i class="p" style="width:${100*t.passed/total}%"></i>
+      <i class="f" style="width:${100*t.failed/total}%"></i></div>`;
+    const elapsed = r.started_at ? ((r.finished_at?new Date(r.finished_at):new Date())-new Date(r.started_at))/1000 : 0;
+    const row = `<tr class="reg" data-id="${esc(r.id)}">
+      <td><span class="mono">${esc(r.id)}</span>${r.name?`<div class="muted">${esc(r.name)}</div>`:""}</td>
+      <td><span class="st ${r.state}">${r.state}</span>${t.flaky?`<div class="muted" style="font-size:11px">${t.flaky} flaky</div>`:""}</td>
+      <td class="mono">${t.suites_passed}/${t.suites} ${t.suites_running?`<span class="st running">·${t.suites_running}▶</span>`:""}${t.suites_queued?`<span class="muted">·${t.suites_queued}⏸</span>`:""}</td>
+      <td>${bar}<div class="muted mono" style="font-size:11px">${t.passed} pass · ${t.failed} fail · ${t.skipped} skip</div></td>
+      <td class="muted">${ago(r.started_at||r.submitted_at)}</td>
+      <td class="mono">${dur(elapsed)}</td>
+      <td class="mono muted" style="font-size:11px">${esc(r.artifact_uri||"")}</td></tr>`;
+    const det = open.has(r.id) ? `<tr><td colspan="7" class="detail" id="d-${esc(r.id)}">
+      <div class="muted">loading…</div></td></tr>` : "";
+    return row+det;
+  }).join("");
+
+  document.querySelectorAll("tr.reg").forEach(tr=>tr.onclick=()=>{
+    const id=tr.dataset.id;
+    open.has(id) ? open.delete(id) : open.add(id);
+    render(state); if(open.has(id)) loadDetail(id);
+  });
+  open.forEach(loadDetail);
+}
+
+async function loadDetail(id){
+  const el = document.getElementById("d-"+id); if(!el) return;
+  const d = await (await fetch(`/api/v1/regressions/${encodeURIComponent(id)}`)).json();
+  el.innerHTML = (d.suites||[]).map(s=>{
+    const key=id+"/"+s.suite;
+    const attempts=(s.runs||[]).sort((a,b)=>a.attempt-b.attempt)
+      .map(r=>`<span class="att ${r.state}" title="attempt ${r.attempt}: ${r.state}">${r.attempt}</span>`).join("");
+    const sm=s.summary||{};
+    return `<div class="suite">
+      <div class="nm mono" data-k="${esc(key)}">${esc(s.suite)}${s.flaky?` <span class="chip" style="color:var(--warn)">flaky</span>`:""}</div>
+      <div><span class="st ${s.state}">${s.state}</span></div>
+      <div class="attempts">${attempts}</div>
+      <div class="mono muted">${sm.tests?`${sm.passed}/${sm.tests} pass${sm.failed+sm.errors?` · <span class="st failed">${sm.failed+sm.errors} fail</span>`:""}`:"—"}</div>
+      <div class="mono muted">${dur(s.duration_seconds)}</div>
+      <div class="muted mono" style="font-size:11.5px">${esc(s.node||"")} ${s.message?`· ${esc(s.message)}`:""}</div>
+    </div>${openSuites.has(key)?`<div class="fails" id="f-${esc(key)}">loading…</div>`:""}`;
+  }).join("") || `<div class="muted">No suites.</div>`;
+
+  el.querySelectorAll(".nm[data-k]").forEach(n=>n.onclick=e=>{
+    e.stopPropagation();
+    const k=n.dataset.k;
+    openSuites.has(k)?openSuites.delete(k):openSuites.add(k);
+    loadDetail(id);
+  });
+  (d.suites||[]).forEach(s=>{
+    const k=id+"/"+s.suite;
+    if(openSuites.has(k)) loadSuite(k, s);
+  });
+}
+
+async function loadSuite(key, s){
+  const el=document.getElementById("f-"+key);
+  if(!el) return;
+  const latest=(s.runs||[]).reduce((a,b)=>(!a||b.attempt>a.attempt)?b:a,null);
+  if(!latest){ el.textContent="no attempts yet"; return; }
+  let arts=[];
+  try{ arts=(await (await fetch(`/api/v1/runs/${latest.id}/artifacts`)).json()).artifacts||[]; }catch(e){}
+  const cases=(latest.cases||[]).slice(0,25).map(c=>`<div class="fail-case">
+      <div class="t mono">${esc(c.class)}.${esc(c.name)}</div>
+      ${c.message?`<div class="muted">${esc(c.message)}</div>`:""}
+      ${c.details?`<pre>${esc(c.details)}</pre>`:""}</div>`).join("");
+  el.innerHTML = `${cases||`<div class="muted">No failing test cases recorded.</div>`}
+    <div class="arts">${arts.map(a=>
+      `<a href="/api/v1/runs/${latest.id}/artifacts/${a.path.split("/").map(encodeURIComponent).join("/")}"
+        target="_blank">${esc(a.path)} <span class="muted">${(a.size/1024).toFixed(1)}k</span></a>`).join("")
+      || `<span class="muted">no artifacts</span>`}</div>`;
+}
+poll();
+</script>
+</body>
+</html>

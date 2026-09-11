@@ -1,0 +1,158 @@
+# Full PoC stack: object store, a single-server Nomad cluster with three worker
+# nodes across two pools, and the master (API + dashboard).
+#
+#   docker compose -f deploy/docker-compose.yml up -d --build
+#   dtp submit examples/regression.json -w
+#
+# Dashboard  http://localhost:8080
+# Nomad UI   http://localhost:4646
+# MinIO      http://localhost:9001  (dtpadmin / dtpadmin123)
+name: dtp
+
+# The docker-driver client must see its data_dir AND the build cache at
+# identical paths on the host, because the daemon bind-mounts alloc dirs and the
+# cache into the suite containers it starts.
+x-nomad-data: &nomad-data
+  type: bind
+  source: /tmp/dtp-nomad/container
+  target: /tmp/dtp-nomad/container
+  bind: { create_host_path: true }
+
+x-nomad-cache: &nomad-cache
+  type: bind
+  source: /tmp/dtp-nomad/cache
+  target: /tmp/dtp-nomad/cache
+  bind: { create_host_path: true }
+
+services:
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: dtpadmin
+      MINIO_ROOT_PASSWORD: dtpadmin123
+    ports: ["9000:9000", "9001:9001"]
+    volumes: ["minio-data:/data"]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  nomad-server:
+    image: hashicorp/nomad:1.10
+    command: agent -config=/etc/nomad/server.hcl
+    ports: ["4646:4646"]
+    volumes:
+      - ./nomad/server.hcl:/etc/nomad/server.hcl:ro
+      - nomad-server-data:/nomad/data
+    healthcheck:
+      test: ["CMD", "nomad", "status"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  # Creates the node pools ahead of the clients registering into them.
+  nomad-bootstrap:
+    image: hashicorp/nomad:1.10
+    depends_on:
+      nomad-server: { condition: service_healthy }
+    environment:
+      NOMAD_ADDR: http://nomad-server:4646
+    volumes:
+      - ./nomad/pools:/etc/nomad/pools:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "nomad node pool apply /etc/nomad/pools/linux-container.hcl &&
+       nomad node pool apply /etc/nomad/pools/linux-process.hcl &&
+       nomad node pool list"
+    restart: "no"
+
+  # Worker node: "container" abstraction. Suites run as containers on the host
+  # daemon, attached to this compose network so they can reach master + minio.
+  nomad-client-container:
+    image: hashicorp/nomad:1.10
+    command: agent -config=/etc/nomad/client.hcl
+    privileged: true
+    cgroup: host
+    depends_on:
+      nomad-bootstrap: { condition: service_completed_successfully }
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - ./nomad/client-container.hcl:/etc/nomad/client.hcl:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - *nomad-data
+      - *nomad-cache
+
+  # Worker node: "process" abstraction. dtp-runner executes directly on the
+  # node in its own task directory and cgroup.
+  nomad-client-process:
+    build:
+      context: ..
+      dockerfile: deploy/images/nomad-client.Dockerfile
+    image: dtp/nomad-client:dev
+    command: ["agent", "-config=/etc/nomad/client.hcl"]
+    privileged: true
+    cgroup: host
+    depends_on:
+      nomad-bootstrap: { condition: service_completed_successfully }
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - ./nomad/client-process.hcl:/etc/nomad/client.hcl:ro
+      - process-cache:/var/lib/dtp/cache
+      # Persisting the data dir keeps the node's identity across restarts;
+      # without it every recreate registers as a new node and the old one
+      # lingers as "down" until its heartbeat TTL expires.
+      - process-data:/nomad/data
+
+  # A second process node on an older target platform, so submissions can
+  # constrain on meta.dtp.rcp_version.
+  nomad-client-process-legacy:
+    image: dtp/nomad-client:dev
+    command: ["agent", "-config=/etc/nomad/client.hcl"]
+    privileged: true
+    cgroup: host
+    depends_on:
+      nomad-client-process: { condition: service_started }
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - ./nomad/client-process-legacy.hcl:/etc/nomad/client.hcl:ro
+      - process-legacy-cache:/var/lib/dtp/cache
+      - process-legacy-data:/nomad/data
+
+  # Built so the docker-driver pool has an image to run; exits immediately.
+  rcp-runner-image:
+    build:
+      context: ..
+      dockerfile: deploy/images/rcp-runner.Dockerfile
+    image: dtp/rcp-runner:dev
+    entrypoint: ["true"]
+    restart: "no"
+
+  master:
+    build:
+      context: ..
+      dockerfile: deploy/images/master.Dockerfile
+    image: dtp/master:dev
+    command: ["-config", "/etc/dtp/config.json"]
+    ports: ["8080:8080"]
+    depends_on:
+      minio: { condition: service_healthy }
+      nomad-server: { condition: service_healthy }
+    volumes:
+      - ./nomad.config.json:/etc/dtp/config.json:ro
+      - master-state:/var/lib/dtp
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  minio-data:
+  nomad-server-data:
+  master-state:
+  process-cache:
+  process-legacy-cache:
+  process-data:
+  process-legacy-data:
