@@ -1,32 +1,51 @@
-// Package store keeps regressions and runs in memory and mirrors each
-// regression to one JSON file under the state dir. That is enough durability
-// for a PoC and keeps the master free of an external database; the interface is
-// narrow enough to swap for Postgres later.
+// Package store keeps regressions and runs in memory - the scheduler's
+// authority - and mirrors every mutation to a Backend: one JSON file per
+// regression, or PostgreSQL tables that can be queried and kept for years.
+// The in-memory copy is loaded from the backend at startup.
 package store
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
+	"log/slog"
 	"sort"
 	"sync"
 	"time"
 
+	"github.com/andrei/distributed-test-platform/internal/config"
 	"github.com/andrei/distributed-test-platform/internal/model"
 )
 
-// record is the on-disk shape: a regression and all of its run attempts.
+// record is one regression and all of its run attempts, the unit the file
+// backend persists.
 type record struct {
 	Regression *model.Regression `json:"regression"`
 	Runs       []*model.Run      `json:"runs"`
 	Tokens     map[string]string `json:"tokens,omitempty"` // token -> run id
 }
 
+// Backend is where the store mirrors its state.
+type Backend interface {
+	// Load returns every stored regression with its runs (tokens restored).
+	Load() ([]*record, error)
+	// SaveRecord persists a new regression together with its first runs.
+	SaveRecord(rec *record) error
+	// SaveRegression persists the regression header after a mutation.
+	SaveRegression(rec *record) error
+	// SaveRun persists one run after a mutation (or a newly added retry).
+	SaveRun(rec *record, run *model.Run) error
+	// LoadCatalog returns the stored pools and quotas as authored, or nil
+	// when nothing has been stored yet (first start: the config file seeds it).
+	LoadCatalog() (*config.Catalog, error)
+	// SaveCatalog replaces the stored catalog.
+	SaveCatalog(cat *config.Catalog) error
+	Close() error
+}
+
 // Store is safe for concurrent use.
 type Store struct {
 	mu       sync.RWMutex
-	dir      string
+	be       Backend
+	log      *slog.Logger
 	byReg    map[string]*record
 	byRun    map[string]*model.Run
 	byToken  map[string]*model.Run
@@ -34,36 +53,38 @@ type Store struct {
 	waiters  []chan struct{}
 }
 
+// Open uses the JSON-file backend rooted at dir.
 func Open(dir string) (*Store, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	be, err := NewFileBackend(dir)
+	if err != nil {
 		return nil, err
 	}
+	return OpenWith(be, nil)
+}
+
+// OpenWith loads everything the backend holds. Runs left mid-flight by a
+// master restart are re-queued; the backend allocation, if any, is
+// reconciled away by the scheduler.
+func OpenWith(be Backend, log *slog.Logger) (*Store, error) {
+	if log == nil {
+		log = slog.Default()
+	}
 	s := &Store{
-		dir:     dir,
+		be:      be,
+		log:     log,
 		byReg:   map[string]*record{},
 		byRun:   map[string]*model.Run{},
 		byToken: map[string]*model.Run{},
 	}
-	entries, err := os.ReadDir(dir)
+	recs, err := be.Load()
 	if err != nil {
 		return nil, err
 	}
-	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
-			continue
-		}
-		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
-		if err != nil {
-			return nil, err
-		}
-		var rec record
-		if err := json.Unmarshal(b, &rec); err != nil {
-			return nil, fmt.Errorf("%s: %w", e.Name(), err)
-		}
+	for _, rec := range recs {
 		if rec.Regression == nil {
 			continue
 		}
-		s.byReg[rec.Regression.ID] = &rec
+		s.byReg[rec.Regression.ID] = rec
 		specs := map[string]model.SuiteSpec{}
 		for _, sp := range rec.Regression.Suites {
 			specs[sp.Name] = sp
@@ -71,8 +92,6 @@ func Open(dir string) (*Store, error) {
 		for _, r := range rec.Runs {
 			r.Spec = specs[r.Suite]
 			s.byRun[r.ID] = r
-			// A run left mid-flight by a master restart is re-queued: the
-			// backend allocation, if any, is reconciled away by the scheduler.
 			if !r.State.Terminal() && r.State != model.RunQueued {
 				r.State = model.RunQueued
 				r.DispatchedAt, r.StartedAt = nil, nil
@@ -88,6 +107,15 @@ func Open(dir string) (*Store, error) {
 	return s, nil
 }
 
+// Close releases the backend.
+func (s *Store) Close() error { return s.be.Close() }
+
+// LoadCatalog reads the stored pools and quotas (nil when never seeded).
+func (s *Store) LoadCatalog() (*config.Catalog, error) { return s.be.LoadCatalog() }
+
+// SaveCatalog replaces the stored pools and quotas.
+func (s *Store) SaveCatalog(cat *config.Catalog) error { return s.be.SaveCatalog(cat) }
+
 // ---------------------------------------------------------------------------
 // mutation helpers
 // ---------------------------------------------------------------------------
@@ -98,6 +126,14 @@ func (s *Store) touch() {
 		close(ch)
 	}
 	s.waiters = nil
+}
+
+// Notify bumps the revision for a change made outside the store's own
+// mutations (a catalog reload), so the dashboard's long-poll wakes up.
+func (s *Store) Notify() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.touch()
 }
 
 // Revision returns the current mutation counter.
@@ -127,27 +163,23 @@ func (s *Store) Wait(since uint64, timeout time.Duration) uint64 {
 	return s.Revision()
 }
 
-func (s *Store) persistLocked(regID string) {
-	rec, ok := s.byReg[regID]
-	if !ok {
-		return
-	}
+// tokensLocked refreshes the record's token index before it is persisted.
+func (rec *record) tokens() map[string]string {
 	rec.Tokens = map[string]string{}
 	for _, r := range rec.Runs {
 		if r.Token != "" {
 			rec.Tokens[r.Token] = r.ID
 		}
 	}
-	b, err := json.MarshalIndent(rec, "", "  ")
+	return rec.Tokens
+}
+
+// persist failures are logged, not returned: the in-memory state stays
+// authoritative and the next mutation of the same object writes it again.
+func (s *Store) persistErr(what string, err error) {
 	if err != nil {
-		return
+		s.log.Warn("store: persist failed", "what", what, "err", err)
 	}
-	tmp := filepath.Join(s.dir, regID+".json.tmp")
-	final := filepath.Join(s.dir, regID+".json")
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return
-	}
-	os.Rename(tmp, final)
 }
 
 // ---------------------------------------------------------------------------
@@ -169,7 +201,17 @@ func (s *Store) Create(reg *model.Regression, runs []*model.Run) error {
 			s.byToken[r.Token] = r
 		}
 	}
-	s.persistLocked(reg.ID)
+	rec.tokens()
+	if err := s.be.SaveRecord(rec); err != nil {
+		// A submission that cannot be written is refused outright, so a caller
+		// never gets an ID the store might forget.
+		delete(s.byReg, reg.ID)
+		for _, r := range runs {
+			delete(s.byRun, r.ID)
+			delete(s.byToken, r.Token)
+		}
+		return fmt.Errorf("store: %w", err)
+	}
 	s.touch()
 	return nil
 }
@@ -187,7 +229,8 @@ func (s *Store) AddRun(r *model.Run) {
 	if r.Token != "" {
 		s.byToken[r.Token] = r
 	}
-	s.persistLocked(r.RegressionID)
+	rec.tokens()
+	s.persistErr("run "+r.ID, s.be.SaveRun(rec, r))
 	s.touch()
 }
 
@@ -200,7 +243,9 @@ func (s *Store) UpdateRun(runID string, fn func(*model.Run)) bool {
 		return false
 	}
 	fn(r)
-	s.persistLocked(r.RegressionID)
+	if rec, ok := s.byReg[r.RegressionID]; ok {
+		s.persistErr("run "+r.ID, s.be.SaveRun(rec, r))
+	}
 	s.touch()
 	return true
 }
@@ -214,7 +259,7 @@ func (s *Store) UpdateRegression(regID string, fn func(*model.Regression, []*mod
 		return false
 	}
 	fn(rec.Regression, rec.Runs)
-	s.persistLocked(regID)
+	s.persistErr("regression "+regID, s.be.SaveRegression(rec))
 	s.touch()
 	return true
 }

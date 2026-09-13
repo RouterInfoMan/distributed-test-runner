@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# rcp-suite.sh - stand-in for a headless Eclipse RCP / SWTBot suite.
+# rcp-suite.sh - SIMULATED suite: a stand-in for a headless Eclipse RCP /
+# SWTBot suite that runs no real tests.
 #
-# It produces exactly what the real thing produces - surefire JUnit XML, an
-# Eclipse .log, and a PNG screenshot per UI failure - so the platform can be
-# exercised end to end without a product build. Swap this script for
-# run-suite.sh (the real Eclipse test application launcher) by changing the
-# pool's default command; nothing else in the platform changes.
+# It produces the same shape of output as the real thing - surefire JUnit XML,
+# an Eclipse .log, a rendered "failure screenshot" per failing case (watermarked
+# SIMULATED) - so the platform can be exercised end to end without a product
+# build: examples/regression.json and scripts/smoke.sh use it. Real suites run
+# through run-suite.sh (tycho / eclipse harnesses); see examples/egit.json.
 #
 # Contract with dtp-runner (all supplied via the RunSpec):
 #   DTP_SUITE        suite name, used as the JUnit testsuite name
@@ -21,8 +22,10 @@
 #   FIXTURE_FLAKY     fail only on attempt 1          (default 0)
 #   FIXTURE_CRASH     exit non-zero without results   (default 0)
 set -uo pipefail
+# awk's %f honours the locale; surefire XML wants a decimal point.
+export LC_ALL=C
 
-SUITE="${DTP_SUITE:-org.eclipse.example.test}"
+SUITE="${DTP_SUITE:-simulated.example.test}"
 RESULTS="${DTP_RESULTS_DIR:-./results}"
 ATTEMPT="${DTP_ATTEMPT:-1}"
 TESTS="${FIXTURE_TESTS:-24}"
@@ -34,6 +37,7 @@ CRASH="${FIXTURE_CRASH:-0}"
 
 mkdir -p "$RESULTS" "$RESULTS/screenshots"
 LOG="$RESULTS/eclipse.log"
+SHOT_JAVA="${FIXTURE_SCREENSHOT_JAVA:-$(dirname "$0")/Screenshot.java}"
 
 log() { printf '!ENTRY org.eclipse.dtp 1 0 %s\n!MESSAGE %s\n' "$(date -u +%FT%TZ)" "$*" >>"$LOG"; }
 
@@ -74,15 +78,24 @@ for i in $(seq 1 "$TESTS"); do
   name=$(printf 'test%03d_%s' "$i" "$(shuf -n1 -e shouldOpenPerspective commitStagedChanges resolvesConflictMarkers \
       refreshesDecorations honoursPreferenceStore clonesRemoteRepository opensCompareEditor \
       fetchesUpstreamRefs rebasesOntoOrigin validatesInputDialog 2>/dev/null || echo case)")
-  # org.eclipse.egit.ui.test -> org.eclipse.egit.ui.UiTest
+  # simulated.ui.test -> simulated.ui.UiTest
   base="${SUITE%.test}"; leaf="${base##*.}"
   cls="$base.$(printf '%s' "${leaf^}")Test"
   sleep "$PER_TEST"
 
   if [ "$i" -le "$FAILS" ]; then
     failed=$((failed+1))
-    shot="screenshots/${name}.png"
-    echo "$PNG_B64" | base64 -d > "$RESULTS/$shot" 2>/dev/null || : >"$RESULTS/$shot"
+    shot="screenshots/${cls}.${name}.png"
+    # A rendered mock dialog naming the test and its assertion (needs a JDK,
+    # which every worker image has); a 1-pixel PNG otherwise.
+    if command -v java >/dev/null && [ -f "$SHOT_JAVA" ]; then
+      java -Djava.awt.headless=true "$SHOT_JAVA" "$RESULTS/$shot" "Eclipse - $SUITE" "$cls.$name" \
+        "java.lang.AssertionError: expected:<committed> but was:<conflicting>" \
+        "at $cls.$name(${cls##*.}.java:$((100+i)))" "node ${DTP_NODE_NAME:-unknown}  attempt $ATTEMPT" 2>/dev/null \
+        || echo "$PNG_B64" | base64 -d > "$RESULTS/$shot" 2>/dev/null || : >"$RESULTS/$shot"
+    else
+      echo "$PNG_B64" | base64 -d > "$RESULTS/$shot" 2>/dev/null || : >"$RESULTS/$shot"
+    fi
     log "FAILED $cls.$name - see $shot"
     {
       printf '    <testcase classname="%s" name="%s" time="%s">\n' "$cls" "$name" "$PER_TEST"

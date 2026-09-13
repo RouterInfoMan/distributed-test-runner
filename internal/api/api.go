@@ -1,21 +1,27 @@
 // Package api exposes the master's HTTP surface: submission, status, the
-// runner callback, artifact proxying, and the embedded dashboard.
+// runner callback, artifact proxying, the catalog, and the embedded
+// dashboard.
+//
+//	api.go            the server, routes, the dashboard page, helpers
+//	regressions.go    regressions, runs, the runner callback, artifacts
+//	catalog_api.go    the catalog and its edits
+//	nodes_api.go      nodes, agent heartbeats, the runner binary
+//	views_api.go      pools, quotas, builds, the composer's catalog, the overview
 package api
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
-	"fmt"
-	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/andrei/distributed-test-platform/internal/config"
-	"github.com/andrei/distributed-test-platform/internal/model"
 	"github.com/andrei/distributed-test-platform/internal/s3"
 	"github.com/andrei/distributed-test-platform/internal/sched"
 	"github.com/andrei/distributed-test-platform/internal/store"
@@ -30,6 +36,14 @@ type Server struct {
 	sc  *sched.Scheduler
 	s3  *s3.Client
 	log *slog.Logger
+
+	runnerMu  sync.Mutex
+	runnerKey string // path|size|mtime of the checksummed runner
+	runnerSum string
+
+	pageOnce  sync.Once
+	pageID    string
+	pageBytes []byte
 }
 
 func New(cfg *config.Config, st *store.Store, sc *sched.Scheduler, s3c *s3.Client, log *slog.Logger) *Server {
@@ -44,7 +58,28 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/regressions", s.listRegressions)
 	mux.HandleFunc("GET /api/v1/regressions/{id}", s.getRegression)
 	mux.HandleFunc("POST /api/v1/regressions/{id}/cancel", s.cancelRegression)
+	mux.HandleFunc("POST /api/v1/regressions/{id}/suites/{suite}/cancel", s.cancelSuite)
 	mux.HandleFunc("GET /api/v1/pools", s.getPools)
+	mux.HandleFunc("GET /api/v1/quotas", s.getQuotas)
+	mux.HandleFunc("GET /api/v1/catalog", s.getCatalog)
+	mux.HandleFunc("GET /api/v1/builds", s.getBuilds)
+	mux.HandleFunc("GET /api/v1/nodes", s.getNodes)
+	mux.HandleFunc("POST /api/v1/nodes/{name}/heartbeat", s.heartbeat)
+	mux.HandleFunc("GET /api/v1/runner", s.getRunner)
+	mux.HandleFunc("GET /api/v1/runner/sha256", s.getRunnerSHA)
+	mux.HandleFunc("GET /api/v1/config", s.getConfig)
+	mux.HandleFunc("PUT /api/v1/config", s.putConfig)
+	mux.HandleFunc("PUT /api/v1/config/pools/{name}", s.putPool)
+	mux.HandleFunc("DELETE /api/v1/config/pools/{name}", s.deletePool)
+	mux.HandleFunc("PUT /api/v1/config/groups/{name}", s.putGroup)
+	mux.HandleFunc("DELETE /api/v1/config/groups/{name}", s.deleteGroup)
+	mux.HandleFunc("PUT /api/v1/config/quotas/{key...}", s.putRule)
+	mux.HandleFunc("DELETE /api/v1/config/quotas/{key...}", s.deleteRule)
+	mux.HandleFunc("PUT /api/v1/config/users/{name}", s.putUser)
+	mux.HandleFunc("DELETE /api/v1/config/users/{name}", s.deleteUser)
+	mux.HandleFunc("PUT /api/v1/config/nodes/{name}", s.putNode)
+	mux.HandleFunc("DELETE /api/v1/config/nodes/{name}", s.deleteNode)
+	mux.HandleFunc("POST /api/v1/config/reload", s.reloadConfig)
 	mux.HandleFunc("GET /api/v1/overview", s.overview)
 	mux.HandleFunc("GET /api/v1/runs/{id}", s.getRun)
 	mux.HandleFunc("POST /api/v1/runs/{id}/events", s.runEvent)
@@ -53,14 +88,44 @@ func (s *Server) Handler() http.Handler {
 
 	sub, err := fs.Sub(webFS, "web")
 	if err == nil {
-		mux.Handle("GET /", http.FileServer(http.FS(sub)))
+		static := http.FileServer(http.FS(sub))
+		mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+			// The dashboard stays open for days on a screen and the master
+			// gets rebuilt under it: never let a browser cache it, and stamp
+			// the page with this build so it can notice a newer one.
+			w.Header().Set("Cache-Control", "no-cache")
+			if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				w.Write(s.page())
+				return
+			}
+			static.ServeHTTP(w, r)
+		})
 	}
 	return logging(s.log, mux)
 }
 
-// ---------------------------------------------------------------------------
-// handlers
-// ---------------------------------------------------------------------------
+// page returns index.html stamped with this build's id.
+func (s *Server) page() []byte {
+	s.pageOnce.Do(func() {
+		b, _ := webFS.ReadFile("web/index.html")
+		s.pageID = buildID()
+		s.pageBytes = []byte(strings.Replace(string(b), `<meta name="dtp-build" content="">`,
+			`<meta name="dtp-build" content="`+s.pageID+`">`, 1))
+	})
+	return s.pageBytes
+}
+
+// buildID identifies this master binary: the hash of the embedded dashboard
+// plus the process start, so a rebuilt master or a restarted one both count
+// as new to an open page.
+func buildID() string {
+	b, _ := webFS.ReadFile("web/index.html")
+	sum := sha256.Sum256(append(b, []byte(startedAt.Format(time.RFC3339Nano))...))
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+var startedAt = time.Now()
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]any{"status": "ok", "backend": s.sc.Backend().Name()}
@@ -70,227 +135,6 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
-
-func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
-	var sub model.Submission
-	if err := json.NewDecoder(io.LimitReader(r.Body, 8<<20)).Decode(&sub); err != nil {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("invalid submission json: %w", err))
-		return
-	}
-	reg, err := s.sc.Submit(&sub)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	writeJSON(w, http.StatusAccepted, reg)
-}
-
-func (s *Server) listRegressions(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"regressions": s.st.Regressions()})
-}
-
-func (s *Server) getRegression(w http.ResponseWriter, r *http.Request) {
-	reg, runs, ok := s.st.Regression(r.PathValue("id"))
-	if !ok {
-		writeErr(w, http.StatusNotFound, fmt.Errorf("no such regression"))
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"regression": reg,
-		"runs":       runs,
-		"suites":     suiteViews(reg, runs),
-	})
-}
-
-func (s *Server) cancelRegression(w http.ResponseWriter, r *http.Request) {
-	if err := s.sc.Cancel(r.Context(), r.PathValue("id")); err != nil {
-		writeErr(w, http.StatusNotFound, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"canceled": r.PathValue("id")})
-}
-
-func (s *Server) getPools(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"pools": s.sc.Pools()})
-}
-
-// overview backs the dashboard. With ?since=<revision> it long-polls, so the
-// UI updates the moment anything changes instead of on a timer.
-func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
-	rev := s.st.Revision()
-	if v := r.URL.Query().Get("since"); v != "" {
-		if since, err := strconv.ParseUint(v, 10, 64); err == nil {
-			rev = s.st.Wait(since, 25*time.Second)
-		}
-	}
-	health := "ok"
-	berr := ""
-	if err := s.sc.Backend().Healthy(r.Context()); err != nil {
-		health, berr = "degraded", err.Error()
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"revision":      rev,
-		"backend":       s.sc.Backend().Name(),
-		"backend_state": health,
-		"backend_error": berr,
-		"pools":         s.sc.Pools(),
-		"regressions":   s.st.Regressions(),
-		"generated_at":  time.Now().UTC(),
-	})
-}
-
-func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
-	run, ok := s.st.Run(r.PathValue("id"))
-	if !ok {
-		writeErr(w, http.StatusNotFound, fmt.Errorf("no such run"))
-		return
-	}
-	writeJSON(w, http.StatusOK, run)
-}
-
-// runEvent is the runner callback. Authorization is the per-run bearer token
-// minted at queue time, so a node can only report on its own attempt.
-func (s *Server) runEvent(w http.ResponseWriter, r *http.Request) {
-	runID := r.PathValue("id")
-	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	run, ok := s.st.RunByToken(token)
-	if !ok || run.ID != runID {
-		writeErr(w, http.StatusUnauthorized, fmt.Errorf("invalid run token"))
-		return
-	}
-	var ev model.RunEvent
-	if err := json.NewDecoder(io.LimitReader(r.Body, 32<<20)).Decode(&ev); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	ev.RunID = runID
-	if err := s.sc.Ingest(r.Context(), &ev); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	// Roll the regression up immediately so `dtp status -w` reacts at once.
-	s.sc.Rollup(r.Context(), run.RegressionID)
-	writeJSON(w, http.StatusOK, map[string]any{"accepted": true})
-}
-
-func (s *Server) listArtifacts(w http.ResponseWriter, r *http.Request) {
-	run, ok := s.st.Run(r.PathValue("id"))
-	if !ok {
-		writeErr(w, http.StatusNotFound, fmt.Errorf("no such run"))
-		return
-	}
-	if s.s3 == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"artifacts": run.Artifacts})
-		return
-	}
-	prefix := artifactPrefix(run)
-	objs, err := s.s3.ListPrefix(r.Context(), s.cfg.S3.Bucket, prefix)
-	if err != nil {
-		// Fall back to what the runner reported.
-		writeJSON(w, http.StatusOK, map[string]any{"artifacts": run.Artifacts, "warning": err.Error()})
-		return
-	}
-	out := make([]model.ArtRef, 0, len(objs))
-	for _, o := range objs {
-		out = append(out, model.ArtRef{Path: strings.TrimPrefix(o.Key, prefix), Size: o.Size})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"artifacts": out, "prefix": prefix, "uri": run.ArtifactURI})
-}
-
-// getArtifact streams an object through the master so the browser never needs
-// credentials for, or network access to, the object store.
-func (s *Server) getArtifact(w http.ResponseWriter, r *http.Request) {
-	run, ok := s.st.Run(r.PathValue("id"))
-	if !ok {
-		writeErr(w, http.StatusNotFound, fmt.Errorf("no such run"))
-		return
-	}
-	if s.s3 == nil {
-		writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("no object store configured"))
-		return
-	}
-	rel := strings.TrimPrefix(r.PathValue("path"), "/")
-	if strings.Contains(rel, "..") {
-		writeErr(w, http.StatusBadRequest, fmt.Errorf("bad path"))
-		return
-	}
-	body, hdr, err := s.s3.Get(r.Context(), s.cfg.S3.Bucket, artifactPrefix(run)+rel)
-	if err != nil {
-		writeErr(w, http.StatusNotFound, err)
-		return
-	}
-	defer body.Close()
-	ct := hdr.Get("Content-Type")
-	if ct == "" || ct == "application/octet-stream" {
-		ct = s3.GuessContentType(rel)
-	}
-	w.Header().Set("Content-Type", ct)
-	if cl := hdr.Get("Content-Length"); cl != "" {
-		w.Header().Set("Content-Length", cl)
-	}
-	io.Copy(w, body)
-}
-
-func artifactPrefix(run *model.Run) string {
-	return fmt.Sprintf("results/%s/%s/attempt-%d/", run.RegressionID, run.Suite, run.Attempt)
-}
-
-// ---------------------------------------------------------------------------
-// views
-// ---------------------------------------------------------------------------
-
-// SuiteView folds a suite's attempts into one row for the CLI and dashboard.
-type SuiteView struct {
-	Suite    string         `json:"suite"`
-	Pool     string         `json:"pool"`
-	State    model.RunState `json:"state"`
-	Attempts int            `json:"attempts"`
-	Max      int            `json:"max_attempts"`
-	Flaky    bool           `json:"flaky"`
-	Node     string         `json:"node,omitempty"`
-	Summary  model.Summary  `json:"summary"`
-	Duration float64        `json:"duration_seconds"`
-	Message  string         `json:"message,omitempty"`
-	RunID    string         `json:"run_id"`
-	Runs     []*model.Run   `json:"runs,omitempty"`
-}
-
-func suiteViews(reg *model.Regression, runs []*model.Run) []SuiteView {
-	bySuite := map[string][]*model.Run{}
-	for _, r := range runs {
-		bySuite[r.Suite] = append(bySuite[r.Suite], r)
-	}
-	out := make([]SuiteView, 0, len(reg.Suites))
-	for _, su := range reg.Suites {
-		attempts := bySuite[su.Name]
-		v := SuiteView{Suite: su.Name, Pool: su.Pool, State: model.RunQueued, Runs: attempts}
-		if len(attempts) == 0 {
-			out = append(out, v)
-			continue
-		}
-		latest := attempts[0]
-		for _, a := range attempts {
-			if a.Attempt > latest.Attempt {
-				latest = a
-			}
-		}
-		v.State = latest.State
-		v.Attempts = latest.Attempt
-		v.Max = latest.MaxAttempts
-		v.Node = latest.NodeName
-		v.Summary = latest.Summary
-		v.Message = latest.Message
-		v.RunID = latest.ID
-		v.Duration = latest.Duration().Seconds()
-		v.Flaky = latest.State == model.RunPassed && latest.Attempt > 1
-		out = append(out, v)
-	}
-	return out
-}
-
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")

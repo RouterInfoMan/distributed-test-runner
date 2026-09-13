@@ -238,6 +238,20 @@ func (r *Runner) prepareBuild(ctx context.Context) (map[string]string, error) {
 		"DTP_ATTEMPT":     fmt.Sprint(r.Spec.Attempt),
 		"DTP_NODE_NAME":   r.node.Name,
 	}
+	// The slot is a hard ceiling under the docker driver, so a harness can
+	// size its JVM heaps to fit rather than guess.
+	if r.Spec.Slot.Memory > 0 {
+		env["DTP_SLOT_MEMORY_MB"] = fmt.Sprint(r.Spec.Slot.Memory)
+	}
+	if r.Spec.Slot.MemoryMax > 0 {
+		env["DTP_SLOT_MEMORY_MAX_MB"] = fmt.Sprint(r.Spec.Slot.MemoryMax)
+	}
+	if r.Spec.Slot.CPU > 0 {
+		env["DTP_SLOT_CPU"] = fmt.Sprint(r.Spec.Slot.CPU)
+	}
+	if r.Spec.Slot.Disk > 0 {
+		env["DTP_SLOT_DISK_MB"] = fmt.Sprint(r.Spec.Slot.Disk)
+	}
 	if len(r.Spec.Build) == 0 {
 		return env, nil
 	}
@@ -248,8 +262,16 @@ func (r *Runner) prepareBuild(ctx context.Context) (map[string]string, error) {
 			return nil, err
 		}
 		// A single-directory archive is flattened so DTP_BUILD_PRODUCT points
-		// at the product root rather than its wrapper directory.
-		env["DTP_BUILD_"+strings.ToUpper(sanitizeEnv(a.Name))] = flatten(path)
+		// at the product root rather than its wrapper directory. The version
+		// and id come from the build's manifest, resolved by the master.
+		key := "DTP_BUILD_" + strings.ToUpper(sanitizeEnv(a.Name))
+		env[key] = flatten(path)
+		if a.Version != "" {
+			env[key+"_VERSION"] = a.Version
+		}
+		if a.ID != "" {
+			env[key+"_ID"] = a.ID
+		}
 	}
 	return env, nil
 }
@@ -305,7 +327,9 @@ func (r *Runner) runSuite(ctx context.Context, extraEnv map[string]string) (exit
 
 	r.logf("exec: %s (timeout %s, cwd %s)", strings.Join(r.Spec.Command, " "), timeout, r.workspace)
 	start := time.Now()
+	stopProgress := r.reportProgress(runCtx)
 	runErr := cmd.Run()
+	stopProgress()
 	r.logf("exec completed in %s", time.Since(start).Round(time.Millisecond))
 
 	if runCtx.Err() == context.DeadlineExceeded {
@@ -318,6 +342,50 @@ func (r *Runner) runSuite(ctx context.Context, extraEnv map[string]string) (exit
 		return -1, false, fmt.Errorf("could not execute %q: %w", r.Spec.Command[0], runErr)
 	}
 	return 0, false, nil
+}
+
+// ProgressInterval is how often the results directory is re-parsed while the
+// suite runs. Surefire writes one XML per finished test class, so the master
+// sees a long suite advance instead of a 40-minute silence.
+const ProgressInterval = 15 * time.Second
+
+// reportProgress posts interim results until the returned stop function is
+// called. Only changes are sent.
+func (r *Runner) reportProgress(ctx context.Context) func() {
+	done := make(chan struct{})
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		t := time.NewTicker(ProgressInterval)
+		defer t.Stop()
+		last := model.Summary{}
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
+			res, err := junit.ParseDir(r.results)
+			if err != nil || res.Summary == last {
+				continue
+			}
+			last = res.Summary
+			r.post(ctx, &model.RunEvent{
+				RunID:    r.Spec.RunID,
+				Phase:    "progress",
+				NodeID:   r.node.ID,
+				NodeName: r.node.Name,
+				AllocID:  r.node.AllocID,
+				Message:  fmt.Sprintf("%d tests so far, %d failed", res.Summary.Tests, res.Summary.Failed+res.Summary.Errors),
+				Summary:  res.Summary,
+				Cases:    res.Problems(),
+				At:       time.Now().UTC(),
+			})
+		}
+	}()
+	return func() { close(done); <-finished }
 }
 
 // ---------------------------------------------------------------------------

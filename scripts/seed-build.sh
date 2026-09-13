@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Publishes a stand-in "RCP product" build to the object store and prints the
-# environment that examples/regression-with-build.json expects:
+# Publishes a stand-in "RCP product" build (product "rcp-stub", version 4.30)
+# with its manifest to the build repository, so
+# examples/regression-with-build.json can ask for "id": "latest":
 #
-#   source <(./scripts/seed-build.sh)
+#   ./scripts/seed-build.sh
 #   ./bin/dtp submit examples/regression-with-build.json -w
 #
 # Every suite in that submission names the same sha256, so the first suite on a
@@ -30,6 +31,21 @@ head -c 8000000 /dev/urandom > "$PROD/plugins/org.eclipse.platform.resources.bin
 TAR=".dtp/build/rcp-4.30-linux.tar.gz"
 tar czf "$TAR" -C "$OUT" "$(basename "$PROD")"
 SHA=$(sha256sum "$TAR" | awk '{print $1}')
+# The manifest beside the payload is what the master reads from the build
+# repository: product, version, checksum, and which harness/suites apply.
+cat > .dtp/build/rcp-4.30-linux.json <<JSON
+{
+  "id": "rcp-4.30-linux",
+  "product": "rcp-stub",
+  "version": "4.30",
+  "built": "$(date -u +%FT%TZ)",
+  "url": "s3://builds/rcp-4.30-linux.tar.gz",
+  "sha256": "$SHA",
+  "size": $(stat -c %s "$TAR"),
+  "unpack": "tar.gz",
+  "harness": "fixture"
+}
+JSON
 
 # Upload through mc, on the compose network when the stack is up.
 NET_ARGS=(--network host)
@@ -38,11 +54,12 @@ if docker network inspect dtp_default >/dev/null 2>&1; then
   NET_ARGS=(--network dtp_default)
   ENDPOINT="http://minio:9000"
 fi
-docker run --rm "${NET_ARGS[@]}" -v "$PWD/.dtp/build:/w" --entrypoint sh minio/mc -c "
+docker run --rm "${NET_ARGS[@]}" -v "$PWD/.dtp/build:/w" --entrypoint sh quay.io/minio/mc -c "
   mc alias set m $ENDPOINT dtpadmin dtpadmin123 >/dev/null &&
   mc mb -p m/builds >/dev/null 2>&1;
-  mc cp /w/rcp-4.30-linux.tar.gz m/builds/ >/dev/null" 1>&2
+  mc cp /w/rcp-4.30-linux.tar.gz m/builds/ >/dev/null && mc cp /w/rcp-4.30-linux.json m/builds/ >/dev/null" 1>&2
 
-echo "# seeded s3://builds/rcp-4.30-linux.tar.gz ($(du -h "$TAR" | cut -f1), sha256 ${SHA:0:12}…)" 1>&2
+echo "# seeded s3://builds/rcp-4.30-linux.tar.gz + manifest ($(du -h "$TAR" | cut -f1), sha256 ${SHA:0:12}…)" 1>&2
 echo "export BUILD_URL=s3://builds/rcp-4.30-linux.tar.gz"
 echo "export BUILD_SHA256=$SHA"
+echo "export BUILD_ID=rcp-4.30-linux"

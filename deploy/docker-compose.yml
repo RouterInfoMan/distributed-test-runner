@@ -1,5 +1,8 @@
-# Full PoC stack: object store, a single-server Nomad cluster with three worker
-# nodes across two pools, and the master (API + dashboard).
+# Full PoC stack: object store, PostgreSQL (the master's store), a
+# single-server Nomad cluster with four worker nodes, and the master (API +
+# dashboard). Which pool a node serves is a row in the master's catalog
+# (seeded by deploy/sql/010_seed_catalog.sql: high-perf-pool, mid-pool,
+# dev-pool, plus the virtual "global" over the two container pools).
 #
 #   docker compose -f deploy/docker-compose.yml up -d --build
 #   dtp submit examples/regression.json -w
@@ -7,26 +10,46 @@
 # Dashboard  http://localhost:8080
 # Nomad UI   http://localhost:4646
 # MinIO      http://localhost:9001  (dtpadmin / dtpadmin123)
+# Postgres   psql postgres://dtp:dtp-s3cret@localhost:5433/dtp
 name: dtp
 
-# The docker-driver client must see its data_dir AND the build cache at
-# identical paths on the host, because the daemon bind-mounts alloc dirs and the
-# cache into the suite containers it starts.
-x-nomad-data: &nomad-data
-  type: bind
-  source: /tmp/dtp-nomad/container
-  target: /tmp/dtp-nomad/container
-  bind: { create_host_path: true }
-
+# A docker-driver client must see its data_dir AND the build cache at identical
+# paths on the host, because the daemon bind-mounts alloc dirs and the cache
+# into the suite containers it starts. Both container nodes share one cache on
+# this single docker host; in a lab each node has its own.
 x-nomad-cache: &nomad-cache
   type: bind
   source: /tmp/dtp-nomad/cache
   target: /tmp/dtp-nomad/cache
   bind: { create_host_path: true }
 
+x-docker-client: &docker-client
+  image: hashicorp/nomad:1.10
+  command: agent -config=/etc/nomad/client.hcl
+  privileged: true
+  cgroup: host
+  depends_on:
+    nomad-bootstrap: { condition: service_completed_successfully }
+
+# The nodes/ directory is mounted whole (not the single file) so an edit to a
+# node.yaml on the host is seen inside - a single-file bind mount keeps the
+# old inode when an editor replaces the file - and the agent picks it up on
+# its next tick.
+x-node-agent: &node-agent
+  image: dtp/master:dev
+  entrypoint: ["/usr/local/bin/dtp-node"]
+  volumes: ["./nodes:/etc/dtp/nodes:ro"]
+  restart: unless-stopped
+
+x-process-client: &process-client
+  image: dtp/nomad-client:dev
+  command: ["agent", "-config=/etc/nomad/client.hcl"]
+  privileged: true
+  cgroup: host
+
 services:
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: dtpadmin
@@ -35,6 +58,28 @@ services:
     volumes: ["minio-data:/data"]
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # The master's store: regressions, the run queue, pools, nodes, groups, users and quota rules as
+  # tables you can query and edit.
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: dtp
+      POSTGRES_PASSWORD: dtp-s3cret
+      POSTGRES_DB: dtp
+    ports: ["127.0.0.1:5433:5432"]   # 5433 on the host: 5432 is often a local Postgres
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Run once when the volume is created: the schema, then the demo lab's
+      # catalog. To change the schema, edit the file and `make stack-stop`
+      # (drops the volume) - this is a PoC, there are no migrations.
+      - ../internal/store/sql/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+      - ./sql/010_seed_catalog.sql:/docker-entrypoint-initdb.d/010_seed_catalog.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dtp -d dtp"]
       interval: 3s
       timeout: 3s
       retries: 20
@@ -52,75 +97,101 @@ services:
       timeout: 3s
       retries: 30
 
-  # Creates the node pools ahead of the clients registering into them.
+  # Lets tasks burst to their slot's memory_max (JVM suites need it). Pools
+  # are the master's, not Nomad's: every client stays in Nomad's default node
+  # pool and the master pins each job to the node it chose.
   nomad-bootstrap:
     image: hashicorp/nomad:1.10
     depends_on:
       nomad-server: { condition: service_healthy }
     environment:
       NOMAD_ADDR: http://nomad-server:4646
-    volumes:
-      - ./nomad/pools:/etc/nomad/pools:ro
     entrypoint: ["/bin/sh", "-c"]
     command: >
-      "nomad node pool apply /etc/nomad/pools/linux-container.hcl &&
-       nomad node pool apply /etc/nomad/pools/linux-process.hcl &&
-       nomad node pool list"
+      "nomad operator scheduler set-config -memory-oversubscription=true &&
+       nomad operator scheduler get-config | grep -i oversub"
     restart: "no"
 
-  # Worker node: "container" abstraction. Suites run as containers on the host
-  # daemon, attached to this compose network so they can reach master + minio.
-  nomad-client-container:
-    image: hashicorp/nomad:1.10
-    command: agent -config=/etc/nomad/client.hcl
-    privileged: true
-    cgroup: host
-    depends_on:
-      nomad-bootstrap: { condition: service_completed_successfully }
+  # rcp-hp-1 (high-perf-pool): "container" abstraction, 6 slots. Suites run as
+  # containers on the host daemon, attached to this compose network so they
+  # can reach master + minio.
+  nomad-client-hp:
+    <<: *docker-client
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
-      - ./nomad/client-container.hcl:/etc/nomad/client.hcl:ro
+      - ./nomad/client-hp.hcl:/etc/nomad/client.hcl:ro
       - /var/run/docker.sock:/var/run/docker.sock
-      - *nomad-data
+      - type: bind
+        source: /tmp/dtp-nomad/hp
+        target: /tmp/dtp-nomad/hp
+        bind: { create_host_path: true }
       - *nomad-cache
 
-  # Worker node: "process" abstraction. dtp-runner executes directly on the
-  # node in its own task directory and cgroup.
-  nomad-client-process:
+  # rcp-mid-1 (mid-pool): same abstraction, 4 slots.
+  nomad-client-mid:
+    <<: *docker-client
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - ./nomad/client-mid.hcl:/etc/nomad/client.hcl:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - type: bind
+        source: /tmp/dtp-nomad/mid
+        target: /tmp/dtp-nomad/mid
+        bind: { create_host_path: true }
+      - *nomad-cache
+
+  # rcp-dev-1 (dev-pool): "process" abstraction. dtp-runner executes directly
+  # on the node in its own task directory and cgroup.
+  nomad-client-dev:
+    <<: *process-client
     build:
       context: ..
       dockerfile: deploy/images/nomad-client.Dockerfile
-    image: dtp/nomad-client:dev
-    command: ["agent", "-config=/etc/nomad/client.hcl"]
-    privileged: true
-    cgroup: host
     depends_on:
       nomad-bootstrap: { condition: service_completed_successfully }
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
-      - ./nomad/client-process.hcl:/etc/nomad/client.hcl:ro
-      - process-cache:/var/lib/dtp/cache
+      - ./nomad/client-dev.hcl:/etc/nomad/client.hcl:ro
+      - dev-cache:/var/lib/dtp/cache
       # Persisting the data dir keeps the node's identity across restarts;
       # without it every recreate registers as a new node and the old one
       # lingers as "down" until its heartbeat TTL expires.
-      - process-data:/nomad/data
+      - dev-data:/nomad/data
 
-  # A second process node on an older target platform, so submissions can
-  # constrain on meta.dtp.rcp_version.
-  nomad-client-process-legacy:
-    image: dtp/nomad-client:dev
-    command: ["agent", "-config=/etc/nomad/client.hcl"]
-    privileged: true
-    cgroup: host
+  # rcp-dev-2: a second, smaller dev-pool node.
+  nomad-client-dev-2:
+    <<: *process-client
     depends_on:
-      nomad-client-process: { condition: service_started }
+      nomad-client-dev: { condition: service_started }
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
-      - ./nomad/client-process-legacy.hcl:/etc/nomad/client.hcl:ro
-      - process-legacy-cache:/var/lib/dtp/cache
-      - process-legacy-data:/nomad/data
+      - ./nomad/client-dev-2.hcl:/etc/nomad/client.hcl:ro
+      - dev-2-cache:/var/lib/dtp/cache
+      - dev-2-data:/nomad/data
 
-  # Built so the docker-driver pool has an image to run; exits immediately.
+  # Node agents: dtp-node + node.yaml per worker. On a real node the agent runs
+  # beside the Nomad client (systemd); here it is a sidecar that reaches the
+  # client over the compose network. It labels the node (dynamic node
+  # metadata) with its slot count and slot size from node.yaml, heartbeats to
+  # the master, prunes the cache.
+  node-hp:
+    <<: *node-agent
+    command: ["-config", "/etc/dtp/nodes/hp.yaml", "run"]
+    depends_on: { master: { condition: service_healthy }, nomad-client-hp: { condition: service_started } }
+  node-mid:
+    <<: *node-agent
+    command: ["-config", "/etc/dtp/nodes/mid.yaml", "run"]
+    depends_on: { master: { condition: service_healthy }, nomad-client-mid: { condition: service_started } }
+  node-dev:
+    <<: *node-agent
+    command: ["-config", "/etc/dtp/nodes/dev.yaml", "run"]
+    depends_on: { master: { condition: service_healthy }, nomad-client-dev: { condition: service_started } }
+  node-dev-2:
+    <<: *node-agent
+    command: ["-config", "/etc/dtp/nodes/dev-2.yaml", "run"]
+    depends_on: { master: { condition: service_healthy }, nomad-client-dev-2: { condition: service_started } }
+
+  # Built so the docker-driver pools have an image to run; exits immediately.
   rcp-runner-image:
     build:
       context: ..
@@ -138,9 +209,11 @@ services:
     ports: ["8080:8080"]
     depends_on:
       minio: { condition: service_healthy }
+      postgres: { condition: service_healthy }
       nomad-server: { condition: service_healthy }
     volumes:
       - ./nomad.config.json:/etc/dtp/config.json:ro
+      - ../examples:/etc/dtp/templates:ro
       - master-state:/var/lib/dtp
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
@@ -150,9 +223,10 @@ services:
 
 volumes:
   minio-data:
+  postgres-data:
   nomad-server-data:
   master-state:
-  process-cache:
-  process-legacy-cache:
-  process-data:
-  process-legacy-data:
+  dev-cache:
+  dev-2-cache:
+  dev-data:
+  dev-2-data:

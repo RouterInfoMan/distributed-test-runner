@@ -57,3 +57,20 @@ func TestParseRejectsNonReport(t *testing.T) {
 		t.Fatal("expected an error for a non-report XML document")
 	}
 }
+
+// A decimal comma from a locale-sensitive harness must not void the report.
+func TestLenientTimeAttribute(t *testing.T) {
+	r, err := Parse(strings.NewReader(`<testsuite name="s" tests="2" failures="0" errors="0" time="1,5">
+  <testcase classname="c" name="a" time="0,5"/>
+  <testcase classname="c" name="b" time="1,000.25"/>
+</testsuite>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Summary.Tests != 2 || r.Summary.Passed != 2 {
+		t.Fatalf("want 2 passed, got %+v", r.Summary)
+	}
+	if r.Summary.Duration != 1.5 || r.Cases[0].Duration != 0.5 || r.Cases[1].Duration != 1000.25 {
+		t.Fatalf("times not parsed leniently: %v %v", r.Summary.Duration, r.Cases)
+	}
+}

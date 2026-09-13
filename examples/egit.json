@@ -1,0 +1,44 @@
+{
+  "name": "egit-7.8",
+  "priority": 60,
+  "labels": {
+    "project": "egit",
+    "trigger": "manual"
+  },
+  "defaults": {
+    "pool": "global",
+    "timeout": "45m",
+    "retries": 0,
+    "requires": {
+      "os": "linux",
+      "display": "xvfb"
+    },
+    "build": [
+      {
+        "name": "egit",
+        "id": "latest",
+        "product": "egit"
+      }
+    ],
+    "env": {
+      "DTP_HARNESS": "tycho"
+    },
+    "//": "The build comes from the repository: \"id\": \"latest\" takes the newest egit payload scripts/build-egit.sh published (with its manifest: version, sha256, unpack, suites); pin one with \"id\": \"egit-b522e135e4\" instead. Each suite is a Tycho test module run offline from a private copy of the reactor; DTP_MAVEN_ARGS can narrow it, e.g. -Dtest=CommitActionTest. ui.test takes ~12 min for 615 SWTBot tests; give it retries: 1 if your failures are flaky rather than deterministic."
+  },
+  "suites": [
+    {
+      "name": "org.eclipse.egit.core.test",
+      "timeout": "30m"
+    },
+    {
+      "name": "org.eclipse.egit.ui.test",
+      "pool": "high-perf-pool",
+      "timeout": "60m",
+      "retries": 0
+    },
+    {
+      "name": "org.eclipse.egit.gitflow.test",
+      "timeout": "30m"
+    }
+  ]
+}

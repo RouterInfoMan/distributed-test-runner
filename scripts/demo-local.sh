@@ -15,7 +15,7 @@ if ! curl -sf http://127.0.0.1:9000/minio/health/live >/dev/null 2>&1; then
   docker rm -f dtp-minio >/dev/null 2>&1 || true
   docker run -d --name dtp-minio -p 9000:9000 -p 9001:9001 \
     -e MINIO_ROOT_USER=dtpadmin -e MINIO_ROOT_PASSWORD=dtpadmin123 \
-    minio/minio:latest server /data --console-address ":9001" >/dev/null
+    quay.io/minio/minio:latest server /data --console-address ":9001" >/dev/null
   for _ in $(seq 1 40); do
     curl -sf http://127.0.0.1:9000/minio/health/live >/dev/null && break; sleep 0.5
   done
@@ -28,6 +28,10 @@ fi
 ./bin/dtp-master -config deploy/local.config.json > .dtp/master.log 2>&1 &
 echo $! > .dtp/master.pid
 for _ in $(seq 1 40); do curl -sf http://127.0.0.1:8080/healthz >/dev/null && break; sleep 0.5; done
+# Pools and quotas live in the store; on a fresh state dir there are none yet.
+if [ "$(curl -sf http://127.0.0.1:8080/api/v1/config | grep -c '"name"')" = "0" ]; then
+  ./bin/dtp config apply deploy/local.catalog.json
+fi
 # Let the scheduler complete one tick so the slot ledger is populated.
 for _ in $(seq 1 20); do
   [ "$(curl -sf http://127.0.0.1:8080/api/v1/pools | grep -c '"ready": true')" != "0" ] && break

@@ -1,7 +1,8 @@
-// Package backend abstracts "put this suite on a node and tell me how it went".
-// The Nomad backend generates a batch job per suite attempt; the local backend
-// forks dtp-runner on the master host and exists so the platform can be
-// exercised end to end without a cluster.
+// Package backend abstracts "run this suite on that node and tell me how it
+// went". The master chooses the node; a backend only executes there. The
+// Nomad backend generates a batch job per suite attempt pinned to the node;
+// the local backend forks dtp-runner on the master host and exists so the
+// platform can be exercised end to end without a cluster.
 package backend
 
 import (
@@ -11,11 +12,14 @@ import (
 )
 
 // NodeInfo is one worker as the scheduler sees it.
+// NodeInfo is one worker as the backend sees it. Pool membership is not the
+// backend's business: the master's catalog assigns nodes to pools. Slots and
+// Slot are what the node declared (meta.dtp.slots, meta.dtp.slot.*).
 type NodeInfo struct {
 	ID     string            `json:"id"`
 	Name   string            `json:"name"`
-	Pool   string            `json:"pool"`
 	Slots  int               `json:"slots"`
+	Slot   model.Slot        `json:"slot"`
 	Ready  bool              `json:"ready"`
 	Status string            `json:"status"`
 	Meta   map[string]string `json:"meta,omitempty"`
@@ -24,7 +28,7 @@ type NodeInfo struct {
 // Placement is what the backend knows the moment a run is handed off.
 type Placement struct {
 	BackendID string // Nomad job id, or a local handle
-	NodeID    string // known immediately only for the local backend
+	NodeID    string
 	NodeName  string
 }
 
@@ -51,12 +55,22 @@ type Status struct {
 	Message  string
 }
 
+// BulkPoller is implemented by backends that can report every dispatched run
+// in one round trip. The scheduler prefers it over Poll, so reconciliation
+// costs one API call per tick rather than one per in-flight suite.
+type BulkPoller interface {
+	// PollAll returns a status for every run it could see, keyed by run ID.
+	// Runs missing from the map are polled individually.
+	PollAll(ctx context.Context, runs []*model.Run) (map[string]Status, error)
+}
+
 // Backend is implemented by the Nomad and local drivers.
 type Backend interface {
 	Name() string
 	// Inventory lists the worker nodes and their slot counts.
 	Inventory(ctx context.Context) ([]NodeInfo, error)
-	// Dispatch places one suite attempt.
+	// Dispatch launches one suite attempt on the node the scheduler chose
+	// (run.NodeID / run.NodeName), reserving spec.Slot there.
 	Dispatch(ctx context.Context, run *model.Run, spec model.RunSpec) (Placement, error)
 	// Poll reports the backend's view of a dispatched run.
 	Poll(ctx context.Context, run *model.Run) (Status, error)

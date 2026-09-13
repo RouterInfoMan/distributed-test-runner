@@ -17,6 +17,7 @@ import (
 	"github.com/andrei/distributed-test-platform/internal/api"
 	"github.com/andrei/distributed-test-platform/internal/backend"
 	"github.com/andrei/distributed-test-platform/internal/config"
+	"github.com/andrei/distributed-test-platform/internal/pg"
 	"github.com/andrei/distributed-test-platform/internal/s3"
 	"github.com/andrei/distributed-test-platform/internal/sched"
 	"github.com/andrei/distributed-test-platform/internal/store"
@@ -39,10 +40,29 @@ func main() {
 		os.Exit(1)
 	}
 
-	st, err := store.Open(cfg.StateDir + "/regressions")
+	st, err := openStore(cfg, log)
 	if err != nil {
 		log.Error("open store", "err", err)
 		os.Exit(1)
+	}
+	defer st.Close()
+
+	// Pools and quotas live in the store and nowhere else. Until it holds
+	// some, the master runs with none: submissions are refused with "unknown
+	// pool" and the dashboard's Config editor (or dtp config apply, or SQL)
+	// is where they get added.
+	switch cat, err := st.LoadCatalog(); {
+	case err != nil:
+		log.Error("load catalog", "err", err)
+		os.Exit(1)
+	case cat == nil:
+		log.Warn("catalog: the store has no pools yet; add them with `dtp config apply <catalog.json>`, the dashboard or SQL")
+	default:
+		if err := cfg.SetCatalog(cat); err != nil {
+			log.Error("catalog: stored pools/quotas are invalid; running with none until fixed", "err", err)
+		} else {
+			log.Info("catalog: loaded from the store", "pools", len(cat.Pools), "nodes", len(cat.Nodes), "groups", len(cat.Groups), "users", len(cat.Users), "rules", len(cat.Quotas))
+		}
 	}
 
 	var s3c *s3.Client
@@ -92,7 +112,7 @@ func main() {
 
 	go func() {
 		log.Info("master listening", "addr", cfg.Listen, "backend", be.Name(),
-			"pools", len(cfg.Pools), "dashboard", fmt.Sprintf("http://localhost%s/", cfg.Listen))
+			"pools", len(cfg.Catalog().Pools), "dashboard", fmt.Sprintf("http://localhost%s/", cfg.Listen))
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Error("listen", "err", err)
 			os.Exit(1)
@@ -104,4 +124,29 @@ func main() {
 	sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	srv.Shutdown(sctx)
+}
+
+// openStore picks the persistence backend: PostgreSQL when configured, else
+// JSON files under the state dir.
+func openStore(cfg *config.Config, log *slog.Logger) (*store.Store, error) {
+	var be store.Backend
+	var err error
+	switch cfg.Store.Driver {
+	case "postgres":
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		be, err = store.NewPostgresBackend(ctx, cfg.Store.DSN)
+		if err != nil {
+			return nil, err
+		}
+		pc, _ := pg.ParseDSN(cfg.Store.DSN)
+		log.Info("store: postgres", "host", pc.Host, "database", pc.Database)
+	default:
+		be, err = store.NewFileBackend(cfg.StateDir + "/regressions")
+		if err != nil {
+			return nil, err
+		}
+		log.Info("store: json files", "dir", cfg.StateDir+"/regressions")
+	}
+	return store.OpenWith(be, log)
 }

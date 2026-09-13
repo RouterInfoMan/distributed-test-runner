@@ -53,14 +53,20 @@ type Node struct {
 	NodeStub
 	Meta          map[string]string `json:"Meta"`
 	Attributes    map[string]string `json:"Attributes"`
-	NodeResources *struct {
-		Cpu struct {
-			CpuShares int64 `json:"CpuShares"`
-		} `json:"Cpu"`
-		Memory struct {
-			MemoryMB int64 `json:"MemoryMB"`
-		} `json:"Memory"`
-	} `json:"NodeResources"`
+	NodeResources *NodeResources    `json:"NodeResources"`
+}
+
+// NodeResources is the fingerprinted capacity the scheduler places against.
+type NodeResources struct {
+	Cpu    CPUResources `json:"Cpu"`
+	Memory struct {
+		MemoryMB int64 `json:"MemoryMB"`
+	} `json:"Memory"`
+}
+
+type CPUResources struct {
+	CpuShares          int64 `json:"CpuShares"`          // MHz of compute
+	ReservableCpuCores []int `json:"ReservableCpuCores"` // cores a task may pin
 }
 
 // Ready reports whether the node can accept work right now.
@@ -79,6 +85,7 @@ type Alloc struct {
 	DesiredStatus      string            `json:"DesiredStatus"`
 	DesiredDescription string            `json:"DesiredDescription"`
 	TaskStates         map[string]*State `json:"TaskStates"`
+	CreateIndex        uint64            `json:"CreateIndex"`
 }
 
 type State struct {
@@ -89,11 +96,12 @@ type State struct {
 }
 
 type Event struct {
-	Type           string `json:"Type"`
-	Time           int64  `json:"Time"`
-	DisplayMessage string `json:"DisplayMessage"`
-	ExitCode       int    `json:"ExitCode"`
-	Message        string `json:"Message"`
+	Type           string            `json:"Type"`
+	Time           int64             `json:"Time"`
+	DisplayMessage string            `json:"DisplayMessage"`
+	ExitCode       int               `json:"ExitCode"`
+	Message        string            `json:"Message"`
+	Details        map[string]string `json:"Details"` // drivers add exit_code, signal, oom_killed
 }
 
 // ExitCode returns the task's exit code when it has finished.
@@ -110,19 +118,29 @@ func (a *Alloc) ExitCode() (int, bool) {
 
 // FailureMessage surfaces the most useful description of why an alloc failed.
 func (a *Alloc) FailureMessage() string {
-	if a.ClientDescription != "" {
-		return a.ClientDescription
-	}
+	// The task's own end is the most specific thing Nomad knows; an OOM kill
+	// in particular looks like a plain non-zero exit everywhere else.
 	for _, ts := range a.TaskStates {
 		for i := len(ts.Events) - 1; i >= 0; i-- {
 			e := ts.Events[i]
-			if e.Type == "Driver Failure" || e.Type == "Setup Failure" || e.Type == "Killing" {
+			switch e.Type {
+			case "Terminated":
+				if e.Details["oom_killed"] == "true" {
+					return fmt.Sprintf("OOM killed: the task exceeded its memory limit (exit %d)", e.ExitCode)
+				}
+				if e.ExitCode != 0 {
+					return fmt.Sprintf("task exited %d without reporting results", e.ExitCode)
+				}
+			case "Driver Failure", "Setup Failure", "Killing":
 				if e.DisplayMessage != "" {
 					return e.DisplayMessage
 				}
 				return e.Message
 			}
 		}
+	}
+	if a.ClientDescription != "" {
+		return a.ClientDescription
 	}
 	return a.DesiredDescription
 }

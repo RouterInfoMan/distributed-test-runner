@@ -1,0 +1,24 @@
+# dtp-node config for rcp-hp-1. On a real node this file sits next to the binary
+# (/etc/dtp/node.yaml) and nomad points at the local client; in the compose
+# demo the agent runs as a sidecar and reaches the client over the network.
+master: http://master:8080
+nomad: http://nomad-client-hp:4646
+name: rcp-hp-1
+
+slots: 6               # how many suites this node runs at once; the agent warns if slots × slot does not fit the node
+slot:                  # what each of them gets (published as meta.dtp.slot.*; the master sizes every job from it)
+  cores: 2
+  memory_mb: 4096
+  memory_max_mb: 8192  # burst ceiling (Nomad memory oversubscription)
+  disk_mb: 2048
+
+pool: high-perf-pool   # only a suggestion for the first registration; the master's catalog decides after that
+
+labels:                # meta.dtp.*; these override what the agent detects
+  perf: high
+  display: xvfb        # the worker image has Xvfb; the sidecar itself does not
+  java: "21"
+
+cache_dir: /var/lib/dtp/cache
+cache_keep: 168h
+interval: 30s

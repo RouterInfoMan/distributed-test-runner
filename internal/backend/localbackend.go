@@ -52,15 +52,11 @@ func (b *LocalBackend) Healthy(_ context.Context) error { return nil }
 func (b *LocalBackend) Inventory(_ context.Context) ([]NodeInfo, error) {
 	out := make([]NodeInfo, 0, len(b.cfg.LocalNodes))
 	for _, n := range b.cfg.LocalNodes {
-		slots := n.Slots
-		if slots <= 0 {
-			slots = 1
-		}
 		out = append(out, NodeInfo{
 			ID:     "local-" + n.Name,
 			Name:   n.Name,
-			Pool:   n.Pool,
-			Slots:  slots,
+			Slots:  n.Slots,
+			Slot:   n.Slot,
 			Ready:  true,
 			Status: "ready",
 			Meta:   n.Meta,
@@ -69,45 +65,20 @@ func (b *LocalBackend) Inventory(_ context.Context) ([]NodeInfo, error) {
 	return out, nil
 }
 
-// pickNode does what Nomad's scheduler would: first node in the pool that has
-// a free slot and satisfies the suite's required meta.
-func (b *LocalBackend) pickNode(run *model.Run) (string, string, error) {
-	pool, _ := b.cfg.Pool(run.Pool)
+// claim reserves one of the chosen node's slots, the way Nomad would refuse
+// a placement that does not fit.
+func (b *LocalBackend) claim(run *model.Run) (string, error) {
 	for _, n := range b.cfg.LocalNodes {
-		if n.Pool != run.Pool {
+		if "local-"+n.Name != run.NodeID {
 			continue
 		}
-		if !metaSatisfies(n.Meta, pool, run.Spec.Requires) {
-			continue
+		if b.nodeUse[n.Name] >= n.Slots {
+			return "", fmt.Errorf("node %s has no free slot (%d/%d)", n.Name, b.nodeUse[n.Name], n.Slots)
 		}
-		slots := n.Slots
-		if slots <= 0 {
-			slots = 1
-		}
-		if b.nodeUse[n.Name] < slots {
-			b.nodeUse[n.Name]++
-			return "local-" + n.Name, n.Name, nil
-		}
+		b.nodeUse[n.Name]++
+		return n.Name, nil
 	}
-	return "", "", fmt.Errorf("no free slot in pool %q matching %v", run.Pool, run.Spec.Requires)
-}
-
-func metaSatisfies(meta map[string]string, pool *config.Pool, requires map[string]string) bool {
-	merged := map[string]string{}
-	if pool != nil {
-		for k, v := range pool.Constraints {
-			merged[k] = v
-		}
-	}
-	for k, v := range requires {
-		merged[k] = v
-	}
-	for k, want := range merged {
-		if meta[k] != want {
-			return false
-		}
-	}
-	return true
+	return "", fmt.Errorf("unknown local node %q", run.NodeID)
 }
 
 func (b *LocalBackend) Dispatch(_ context.Context, run *model.Run, spec model.RunSpec) (Placement, error) {
@@ -120,12 +91,16 @@ func (b *LocalBackend) Dispatch(_ context.Context, run *model.Run, spec model.Ru
 		return Placement{}, err
 	}
 
+	if run.NodeID == "" {
+		return Placement{}, fmt.Errorf("run %s has no node chosen", run.ID)
+	}
 	b.mu.Lock()
-	nodeID, nodeName, err := b.pickNode(run)
+	nodeName, err := b.claim(run)
 	b.mu.Unlock()
 	if err != nil {
 		return Placement{}, err
 	}
+	nodeID := run.NodeID
 	release := func() {
 		b.mu.Lock()
 		if b.nodeUse[nodeName] > 0 {

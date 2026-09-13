@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/andrei/distributed-test-platform/internal/model"
@@ -29,7 +30,7 @@ type xmlSuite struct {
 	Failures int        `xml:"failures,attr"`
 	Errors   int        `xml:"errors,attr"`
 	Skipped  int        `xml:"skipped,attr"`
-	Time     float64    `xml:"time,attr"`
+	Time     seconds    `xml:"time,attr"`
 	Nested   []xmlSuite `xml:"testsuite"`
 	Cases    []xmlCase  `xml:"testcase"`
 }
@@ -37,7 +38,7 @@ type xmlSuite struct {
 type xmlCase struct {
 	Name      string      `xml:"name,attr"`
 	ClassName string      `xml:"classname,attr"`
-	Time      float64     `xml:"time,attr"`
+	Time      seconds     `xml:"time,attr"`
 	Failure   *xmlProblem `xml:"failure"`
 	Error     *xmlProblem `xml:"error"`
 	Skipped   *xmlSkip    `xml:"skipped"`
@@ -51,6 +52,29 @@ type xmlProblem struct {
 
 type xmlSkip struct {
 	Message string `xml:"message,attr"`
+}
+
+// seconds is a lenient duration attribute: surefire writes "0.857", but a
+// harness under a European locale may write "0,857" (or thousands separators
+// for long suites), and a malformed time must never cost the whole report.
+type seconds float64
+
+func (d *seconds) UnmarshalXMLAttr(attr xml.Attr) error {
+	v := strings.TrimSpace(attr.Value)
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		if strings.Count(v, ",") == 1 && !strings.Contains(v, ".") {
+			v = strings.Replace(v, ",", ".", 1) // decimal comma
+		} else {
+			v = strings.ReplaceAll(v, ",", "") // thousands separator
+		}
+		f, err = strconv.ParseFloat(v, 64)
+	}
+	if err != nil {
+		f = 0
+	}
+	*d = seconds(f)
+	return nil
 }
 
 // Result is the parse of one or more report files.
@@ -137,12 +161,12 @@ func Parse(rd io.Reader) (Result, error) {
 
 func fromSuite(s xmlSuite) Result {
 	var res Result
-	res.Summary.Duration += s.Time
+	res.Summary.Duration += float64(s.Time)
 	for _, c := range s.Cases {
 		mc := model.Case{
 			Class:    c.ClassName,
 			Name:     c.Name,
-			Duration: c.Time,
+			Duration: float64(c.Time),
 			Status:   "passed",
 		}
 		switch {

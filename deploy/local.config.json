@@ -6,7 +6,7 @@
   "local_runner_path": "${DTP_ROOT}/bin/dtp-runner",
   "default_timeout": "15m",
   "default_retries": 0,
-
+  "templates_dir": "${DTP_ROOT}/examples",
   "s3": {
     "endpoint": "http://127.0.0.1:9000",
     "region": "us-east-1",
@@ -14,35 +14,67 @@
     "access_key": "dtpadmin",
     "secret_key": "dtpadmin123"
   },
-
-  "pools": [
+  "local_nodes": [
     {
-      "name": "linux-container",
-      "description": "Headless RCP under Xvfb in a container",
-      "runtime": "container",
-      "slot": { "cpu": 500, "memory": 512, "disk": 512 },
-      "cache_dir": "${DTP_ROOT}/.dtp/cache/linux-container",
-      "default": { "command": ["${DTP_ROOT}/examples/fixtures/rcp-suite.sh"] }
+      "name": "sim-hp-1",
+      "slots": 6,
+      "slot": {
+        "cores": 2,
+        "memory": 4096,
+        "memory_max": 8192,
+        "disk": 2048
+      },
+      "meta": {
+        "os": "linux",
+        "display": "xvfb",
+        "perf": "high"
+      }
     },
     {
-      "name": "linux-process",
-      "description": "Directory sandbox + process cgroup on a provisioned node",
-      "runtime": "process",
-      "task_driver": "exec",
-      "slot": { "cpu": 500, "memory": 512, "disk": 512 },
-      "cache_dir": "${DTP_ROOT}/.dtp/cache/linux-process",
-      "default": { "command": ["${DTP_ROOT}/examples/fixtures/rcp-suite.sh"] }
+      "name": "sim-mid-1",
+      "slots": 4,
+      "slot": {
+        "cores": 2,
+        "memory": 4096,
+        "memory_max": 8192,
+        "disk": 2048
+      },
+      "meta": {
+        "os": "linux",
+        "display": "xvfb",
+        "perf": "standard"
+      }
+    },
+    {
+      "name": "sim-dev-1",
+      "slots": 2,
+      "slot": {
+        "cores": 2,
+        "memory": 4096,
+        "memory_max": 8192,
+        "disk": 2048
+      },
+      "meta": {
+        "os": "linux",
+        "display": "xvfb",
+        "perf": "standard"
+      }
+    },
+    {
+      "name": "sim-dev-2",
+      "slots": 1,
+      "slot": {
+        "cores": 2,
+        "memory": 4096,
+        "memory_max": 8192,
+        "disk": 2048
+      },
+      "meta": {
+        "os": "linux",
+        "display": "xvfb",
+        "perf": "standard"
+      }
     }
   ],
-
-  "local_nodes": [
-    { "name": "sim-container-1", "pool": "linux-container", "slots": 3,
-      "meta": { "os": "linux", "display": "xvfb", "rcp_version": "4.30" } },
-    { "name": "sim-container-2", "pool": "linux-container", "slots": 3,
-      "meta": { "os": "linux", "display": "xvfb", "rcp_version": "4.30" } },
-    { "name": "sim-process-1", "pool": "linux-process", "slots": 2,
-      "meta": { "os": "linux", "display": "xvfb", "rcp_version": "4.30" } },
-    { "name": "sim-process-legacy", "pool": "linux-process", "slots": 1,
-      "meta": { "os": "linux", "display": "xvfb", "rcp_version": "4.26" } }
-  ]
+  "//": "Pools, node assignments, groups, users and quota rules live in the store (catalog.json under state_dir for the file driver); scripts/demo-local.sh applies deploy/local.catalog.json on first start. Slot count and size are declared per node, here for the simulated ones."
 }

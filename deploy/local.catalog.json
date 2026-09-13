@@ -1,0 +1,170 @@
+{
+  "pools": [
+    {
+      "name": "high-perf-pool",
+      "description": "Fast machines: release regressions, long UI suites",
+      "runtime": "container",
+      "cache_dir": "${DTP_ROOT}/.dtp/cache/container",
+      "default": {
+        "command": [
+          "${DTP_ROOT}/examples/fixtures/rcp-suite.sh"
+        ]
+      }
+    },
+    {
+      "name": "mid-pool",
+      "description": "Standard machines: day-to-day regressions",
+      "runtime": "container",
+      "cache_dir": "${DTP_ROOT}/.dtp/cache/container",
+      "default": {
+        "command": [
+          "${DTP_ROOT}/examples/fixtures/rcp-suite.sh"
+        ]
+      }
+    },
+    {
+      "name": "dev-pool",
+      "description": "Provisioned developer boxes: task directory + process cgroup",
+      "runtime": "process",
+      "task_driver": "exec",
+      "cache_dir": "${DTP_ROOT}/.dtp/cache/process",
+      "default": {
+        "command": [
+          "${DTP_ROOT}/examples/fixtures/rcp-suite.sh"
+        ]
+      }
+    },
+    {
+      "name": "global",
+      "description": "Anywhere with capacity: spans the container pools",
+      "spans": [
+        "high-perf-pool",
+        "mid-pool"
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "name": "sim-hp-1",
+      "pool": "high-perf-pool"
+    },
+    {
+      "name": "sim-mid-1",
+      "pool": "mid-pool"
+    },
+    {
+      "name": "sim-dev-1",
+      "pool": "dev-pool"
+    },
+    {
+      "name": "sim-dev-2",
+      "pool": "dev-pool"
+    }
+  ],
+  "groups": [
+    {
+      "name": "core-devs",
+      "description": "The core team"
+    },
+    {
+      "name": "release",
+      "description": "Release engineering and CI"
+    }
+  ],
+  "users": [
+    {
+      "name": "alice",
+      "display_name": "Alice Lindqvist",
+      "groups": [
+        "core-devs"
+      ]
+    },
+    {
+      "name": "bob",
+      "display_name": "Bob Okafor",
+      "groups": [
+        "core-devs",
+        "release"
+      ]
+    },
+    {
+      "name": "carol",
+      "display_name": "Carol Meyer",
+      "groups": [
+        "core-devs"
+      ]
+    },
+    {
+      "name": "jenkins",
+      "display_name": "CI",
+      "groups": [
+        "release"
+      ]
+    }
+  ],
+  "quotas": [
+    {
+      "subject": "global",
+      "scope": "global",
+      "max_slots": 4,
+      "note": "each user, anywhere"
+    },
+    {
+      "subject": "group",
+      "name": "core-devs",
+      "scope": "global",
+      "max_slots": 4
+    },
+    {
+      "subject": "group",
+      "name": "core-devs",
+      "together": true,
+      "scope": "global",
+      "max_slots": 6,
+      "note": "the core team added up"
+    },
+    {
+      "subject": "group",
+      "name": "release",
+      "scope": "global",
+      "max_slots": 8
+    },
+    {
+      "subject": "group",
+      "name": "release",
+      "scope": "pool",
+      "target": "high-perf-pool",
+      "max_slots": 4
+    },
+    {
+      "subject": "user",
+      "name": "carol",
+      "scope": "global",
+      "max_slots": 2,
+      "note": "part-time"
+    },
+    {
+      "subject": "user",
+      "name": "jenkins",
+      "scope": "global",
+      "max_slots": 12,
+      "note": "CI runs a lot"
+    },
+    {
+      "subject": "user",
+      "name": "jenkins",
+      "scope": "pool",
+      "target": "dev-pool",
+      "max_slots": 0,
+      "note": "CI stays off the developer boxes"
+    },
+    {
+      "subject": "global",
+      "together": true,
+      "scope": "node",
+      "target": "sim-hp-1",
+      "max_slots": 5,
+      "note": "one slot of sim-hp-1 stays free for manual runs"
+    }
+  ]
+}

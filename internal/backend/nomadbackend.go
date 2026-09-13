@@ -17,15 +17,16 @@ import (
 )
 
 // MetaPrefix is the node-meta namespace the platform reads and constrains on.
-// A worker declares e.g.
+// dtp-node publishes a worker's node.yaml there, e.g.
 //
-//	meta { "dtp.slots" = "4"  "dtp.os" = "linux"  "dtp.rcp_version" = "4.30" }
+//	dtp.slots = 6   dtp.slot.cores = 2   dtp.slot.memory_mb = 4096   dtp.perf = high
 //
-// and a suite's "requires": {"rcp_version": "4.30"} becomes the Nomad
-// constraint ${meta.dtp.rcp_version} = 4.30.
+// and a suite's "requires": {"perf": "high"} becomes the Nomad constraint
+// ${meta.dtp.perf} = high.
 const MetaPrefix = "dtp."
 
-// SlotsMeta is the node meta key holding a node's parallel-suite capacity.
+// SlotsMeta is the node meta key holding a node's parallel-suite capacity;
+// the slot.* keys hold the size of one slot.
 const SlotsMeta = MetaPrefix + "slots"
 
 type NomadBackend struct {
@@ -63,20 +64,11 @@ func (b *NomadBackend) Inventory(ctx context.Context) ([]NodeInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	pools := map[string]*config.Pool{}
-	for i := range b.cfg.Pools {
-		pools[b.cfg.Pools[i].Name] = &b.cfg.Pools[i]
-	}
 
+	// Every Nomad client is a candidate; which pool it serves is the
+	// catalog's decision, and a node that declares no slots contributes none.
 	var out []NodeInfo
 	for _, st := range stubs {
-		pool := st.NodePool
-		if pool == "" {
-			pool = "default"
-		}
-		if _, known := pools[pool]; !known {
-			continue // node belongs to a pool this platform does not manage
-		}
 		n, err := b.cli.Node(ctx, st.ID)
 		if err != nil {
 			continue
@@ -84,12 +76,12 @@ func (b *NomadBackend) Inventory(ctx context.Context) ([]NodeInfo, error) {
 		info := NodeInfo{
 			ID:     st.ID,
 			Name:   st.Name,
-			Pool:   pool,
 			Ready:  n.Ready(),
 			Status: st.Status,
 			Meta:   filterMeta(n.Meta),
 		}
-		info.Slots = slotsFor(n, pools[pool])
+		info.Slots = slotsFor(n)
+		info.Slot = slotOf(n)
 		out = append(out, info)
 	}
 
@@ -99,21 +91,32 @@ func (b *NomadBackend) Inventory(ctx context.Context) ([]NodeInfo, error) {
 	return out, nil
 }
 
-// slotsFor prefers the node's declared meta.dtp.slots and otherwise derives the
-// count from the node's CPU against the pool's slot size, so an operator can
-// declare capacity either way.
-func slotsFor(n *nomad.Node, pool *config.Pool) int {
-	if v, ok := n.Meta[SlotsMeta]; ok {
+// slotsFor is the node's declared meta.dtp.slots (set by dtp-node from
+// node.yaml, or statically in the client HCL). A node that declares nothing
+// has no slots: capacity is an operator's decision, never inferred from the
+// hardware.
+func slotsFor(n *nomad.Node) int {
+	return metaInt(n.Meta, SlotsMeta)
+}
+
+// slotOf is the node's declared slot size (meta.dtp.slot.*).
+func slotOf(n *nomad.Node) model.Slot {
+	return model.Slot{
+		Cores:     metaInt(n.Meta, MetaPrefix+"slot.cores"),
+		CPU:       metaInt(n.Meta, MetaPrefix+"slot.cpu_mhz"),
+		Memory:    metaInt(n.Meta, MetaPrefix+"slot.memory_mb"),
+		MemoryMax: metaInt(n.Meta, MetaPrefix+"slot.memory_max_mb"),
+		Disk:      metaInt(n.Meta, MetaPrefix+"slot.disk_mb"),
+	}
+}
+
+func metaInt(meta map[string]string, key string) int {
+	if v, ok := meta[key]; ok {
 		if i, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && i > 0 {
 			return i
 		}
 	}
-	if n.NodeResources != nil && pool != nil && pool.Slot.CPU > 0 {
-		if s := int(n.NodeResources.Cpu.CpuShares) / pool.Slot.CPU; s > 0 {
-			return s
-		}
-	}
-	return 1
+	return 0
 }
 
 func filterMeta(meta map[string]string) map[string]string {
@@ -146,6 +149,9 @@ func (b *NomadBackend) Dispatch(ctx context.Context, run *model.Run, spec model.
 	if !ok {
 		return Placement{}, fmt.Errorf("unknown pool %q", run.Pool)
 	}
+	if run.NodeID == "" {
+		return Placement{}, fmt.Errorf("run %s has no node chosen", run.ID)
+	}
 	job, err := b.buildJob(run, spec, pool)
 	if err != nil {
 		return Placement{}, err
@@ -153,7 +159,7 @@ func (b *NomadBackend) Dispatch(ctx context.Context, run *model.Run, spec model.
 	if _, err := b.cli.RegisterJob(ctx, job); err != nil {
 		return Placement{}, err
 	}
-	return Placement{BackendID: job["ID"].(string)}, nil
+	return Placement{BackendID: job["ID"].(string), NodeID: run.NodeID, NodeName: run.NodeName}, nil
 }
 
 // buildJob renders the Nomad batch job for one suite attempt.
@@ -176,11 +182,17 @@ func (b *NomadBackend) buildJob(run *model.Run, spec model.RunSpec, pool *config
 		env[k] = v
 	}
 
-	// One slot's worth of resources, so Nomad's bin-packer lands exactly
-	// meta.dtp.slots suites on a node sized for that many slots.
-	resources := map[string]any{
-		"CPU":      pool.Slot.CPU,
-		"MemoryMB": pool.Slot.Memory,
+	// One of the chosen node's slots: the node declared the envelope, so
+	// Nomad's own accounting lands exactly meta.dtp.slots suites there. Cores
+	// are a cpuset reservation, the same whatever the node's clock speed.
+	resources := map[string]any{"MemoryMB": spec.Slot.Memory}
+	if spec.Slot.Cores > 0 {
+		resources["Cores"] = spec.Slot.Cores
+	} else {
+		resources["CPU"] = spec.Slot.CPU
+	}
+	if spec.Slot.MemoryMax > spec.Slot.Memory {
+		resources["MemoryMaxMB"] = spec.Slot.MemoryMax
 	}
 
 	task := map[string]any{
@@ -243,12 +255,15 @@ func (b *NomadBackend) buildJob(run *model.Run, spec model.RunSpec, pool *config
 		"Count":            1,
 		"RestartPolicy":    map[string]any{"Attempts": 0, "Mode": "fail"},
 		"ReschedulePolicy": map[string]any{"Attempts": 0, "Unlimited": false},
-		"EphemeralDisk":    map[string]any{"SizeMB": pool.Slot.Disk},
+		"EphemeralDisk":    map[string]any{"SizeMB": spec.Slot.Disk},
 		"Tasks":            []map[string]any{task},
 	}
-	if cs := constraints(run, pool); len(cs) > 0 {
-		group["Constraints"] = cs
-	}
+	// The master chose the node; the meta constraints are kept as well so the
+	// job documents why that node qualified.
+	cs := append(constraints(run, pool), map[string]any{
+		"LTarget": "${node.unique.id}", "RTarget": run.NodeID, "Operand": "=",
+	})
+	group["Constraints"] = cs
 	if pool.HostVolume != "" {
 		group["Volumes"] = map[string]any{
 			"cache": map[string]any{"Type": "host", "Source": pool.HostVolume, "ReadOnly": false},
@@ -258,13 +273,15 @@ func (b *NomadBackend) buildJob(run *model.Run, spec model.RunSpec, pool *config
 		}
 	}
 
+	// Pools are the master's, not Nomad's: the job may run in any Nomad node
+	// pool ("all") and is pinned to the chosen node.
 	job := map[string]any{
 		"ID":          JobID(run),
 		"Name":        JobID(run),
 		"Type":        "batch",
 		"Priority":    nomadPriority(run.Priority),
 		"Datacenters": b.cfg.Nomad.Datacenters,
-		"NodePool":    run.Pool,
+		"NodePool":    "all",
 		"TaskGroups":  []map[string]any{group},
 		"Meta": map[string]string{
 			"dtp.regression": run.RegressionID,
@@ -344,7 +361,37 @@ func (b *NomadBackend) Poll(ctx context.Context, run *model.Run) (Status, error)
 	if len(allocs) == 0 {
 		return Status{Phase: PhasePending, Message: "waiting for placement"}, nil
 	}
-	a := allocs[len(allocs)-1]
+	return statusOf(allocs[len(allocs)-1]), nil
+}
+
+// PollAll lists every allocation once and matches them to runs by job ID. A
+// run whose job has no allocation yet is left out, so the scheduler falls back
+// to Poll for it, which can tell "not placed yet" from "job gone".
+func (b *NomadBackend) PollAll(ctx context.Context, runs []*model.Run) (map[string]Status, error) {
+	allocs, err := b.cli.Allocations(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	latest := map[string]nomad.Alloc{} // job id -> newest allocation
+	for _, a := range allocs {
+		if !strings.HasPrefix(a.JobID, "dtp-") {
+			continue
+		}
+		if cur, ok := latest[a.JobID]; !ok || a.CreateIndex > cur.CreateIndex {
+			latest[a.JobID] = a
+		}
+	}
+	out := make(map[string]Status, len(runs))
+	for _, r := range runs {
+		if a, ok := latest[r.BackendID]; ok && r.BackendID != "" {
+			out[r.ID] = statusOf(a)
+		}
+	}
+	return out, nil
+}
+
+// statusOf maps an allocation's client status onto the backend phase.
+func statusOf(a nomad.Alloc) Status {
 	st := Status{AllocID: a.ID, NodeID: a.NodeID, NodeName: a.NodeName}
 	if code, ok := a.ExitCode(); ok {
 		c := code
@@ -366,7 +413,7 @@ func (b *NomadBackend) Poll(ctx context.Context, run *model.Run) (Status, error)
 	default:
 		st.Phase = PhaseUnknown
 	}
-	return st, nil
+	return st
 }
 
 func (b *NomadBackend) Stop(ctx context.Context, run *model.Run) error {

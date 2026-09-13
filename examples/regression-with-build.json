@@ -1,31 +1,47 @@
 {
-  "name": "egit-with-build",
+  "name": "simulated-with-build",
   "priority": 60,
-
   "defaults": {
-    "pool": "linux-container",
+    "pool": "global",
     "timeout": "10m",
-    "requires": { "os": "linux", "display": "xvfb" },
+    "requires": {
+      "os": "linux",
+      "display": "xvfb"
+    },
     "build": [
       {
         "name": "product",
-        "url": "${BUILD_URL}",
-        "sha256": "${BUILD_SHA256}",
-        "unpack": "tar.gz"
+        "id": "latest",
+        "product": "rcp-stub"
       }
     ],
     "env": {
       "FIXTURE_TESTS": "12",
       "FIXTURE_SECONDS": "10"
     },
-    "//": "Set DTP_TEST_APPLICATION in env to launch the real Eclipse test application instead of the fixture, e.g. org.eclipse.test.uitestapplication"
+    "//": "The build is resolved from the repository: \"id\": \"latest\" of product rcp-stub (scripts/seed-build.sh publishes it with its manifest). A stub product payload exercises the node build cache; with no reactor pom and no DTP_TEST_APPLICATION the fixture harness runs. See egit.json for the real thing."
   },
-
   "suites": [
-    { "name": "org.eclipse.jgit.test" },
-    { "name": "org.eclipse.egit.core.test" },
-    { "name": "org.eclipse.egit.ui.test" },
-    { "name": "org.eclipse.egit.gitflow.test", "pool": "linux-process" },
-    { "name": "org.eclipse.egit.ui.smartimport.test", "pool": "linux-process" }
-  ]
+    {
+      "name": "simulated.jgit.test"
+    },
+    {
+      "name": "simulated.core.test"
+    },
+    {
+      "name": "simulated.ui.test"
+    },
+    {
+      "name": "simulated.gitflow.test",
+      "pool": "dev-pool"
+    },
+    {
+      "name": "simulated.smartimport.test",
+      "pool": "dev-pool"
+    }
+  ],
+  "labels": {
+    "simulated": "true"
+  },
+  "//": "SIMULATED: examples/fixtures/rcp-suite.sh generates surefire XML, an eclipse.log and rendered mock screenshots; no product runs. FIXTURE_* env knobs per suite: TESTS, FAIL, SKIP, SECONDS, FLAKY (fail only on attempt 1), CRASH (exit 42, no results). For real suites see egit.json."
 }

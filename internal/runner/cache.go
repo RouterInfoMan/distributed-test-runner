@@ -45,6 +45,10 @@ func (c *Cache) Ensure(ctx context.Context, a model.BuildArtifact) (string, erro
 	ready := filepath.Join(dir, ".ready")
 
 	if _, err := os.Stat(ready); err == nil {
+		// The marker's mtime is "last used": the node agent prunes entries
+		// that have not been touched within its cache_keep window.
+		now := time.Now()
+		os.Chtimes(ready, now, now)
 		c.logf("cache hit  %s (%s)", a.Name, key[:12])
 		return payload, nil
 	}

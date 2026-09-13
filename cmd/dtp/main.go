@@ -10,27 +10,53 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"sort"
 	"strings"
 	"time"
-
-	"github.com/andrei/distributed-test-platform/internal/model"
-	"github.com/andrei/distributed-test-platform/internal/sched"
 )
 
 const usage = `dtp - distributed test platform CLI
 
 usage:
-  dtp submit <submission.json> [-w] [-id ID] [-priority N]
+  dtp submit <submission.json> [-w] [-id ID] [-priority N] [-user NAME]
   dtp status <regression-id> [-w]
   dtp list
   dtp pools
-  dtp cancel <regression-id>
+  dtp quotas                                   # the rule table with live usage
+  dtp quotas set <rule> <max-slots> [note]     # add or change a rule; 0 forbids
+  dtp quotas rm <rule>
+  dtp builds                                   # the build repository: payloads, versions, suites
+  dtp nodes                                    # every node, its pool, slots and slot size
+  dtp nodes assign <node> [<pool>]             # put a node in a pool (no pool: unassign)
+  dtp cancel <regression-id> [-suite NAME]
   dtp artifacts <run-id> [-get PATH]
   dtp logs <run-id>
+  dtp discover <reactor-dir> [-pool NAME] [-build NAME]
+  dtp config                                   # the catalog as stored: pools, nodes, groups, users, quota rules
+  dtp config apply <catalog.json>              # replace it with a {"pools", "nodes", "groups", "users", "quotas"} file
+  dtp config reload                            # re-read the store after editing it with SQL
 
 global flags:
   -master URL   master address (default $DTP_MASTER or http://127.0.0.1:8080)
+
+'submit -user' names who is charged for the slots (default $DTP_USER, then
+$USER); the master charges the slots to that user and applies their rules.
+
+'discover' scans a Tycho reactor for eclipse-test-plugin modules and prints a
+submission that runs each one as a suite; pipe it to a file and submit it.
+
+'config' shows the catalog - pools, node assignments, groups, users and quota
+rules - which lives in the master's store (PostgreSQL tables or catalog.json),
+not in the config file; 'config apply' replaces it, validated, with immediate
+effect; 'nodes assign' moves one node; 'quotas set' writes one rule. Every
+write is idempotent: applying what is already there changes nothing.
+
+A quota rule is (user | group | everyone) x (node | pool | everywhere) -> max
+slots, written as subject[:name][/together]@scope[:target]:
+  global@global                     each user, anywhere
+  user:carol@global                 carol, anywhere (beats her groups' rules)
+  group:release@pool:high-perf-pool each member of release, in that pool
+  group:core-devs/together@global   all of core-devs added up
+  global/together@node:rcp-hp-1     everyone added up, on that node
 
 'submit -w' and 'status -w' follow the run and exit non-zero if it did not
 pass, which is what a CI job wants.
@@ -65,8 +91,9 @@ func main() {
 		watch := fs.Bool("w", false, "wait for completion")
 		id := fs.String("id", "", "override regression id")
 		prio := fs.Int("priority", 0, "override priority")
+		user := fs.String("user", envOr("DTP_USER", os.Getenv("USER")), "user charged for the slots")
 		parse(fs, args, 1)
-		err = doSubmit(arg(0), *id, *prio, *watch)
+		err = doSubmit(arg(0), *id, *prio, *user, *watch)
 	case "status":
 		watch := fs.Bool("w", false, "follow until complete")
 		parse(fs, args, 1)
@@ -77,9 +104,41 @@ func main() {
 	case "pools":
 		parse(fs, args, 0)
 		err = doPools()
+	case "quotas":
+		parse(fs, args, 0)
+		err = doQuotas(posArgs)
+	case "builds":
+		parse(fs, args, 0)
+		err = doBuilds()
+	case "nodes":
+		parse(fs, args, 0)
+		err = doNodes(posArgs)
 	case "cancel":
+		suite := fs.String("suite", "", "cancel only this suite of the regression")
 		parse(fs, args, 1)
-		err = doCancel(arg(0))
+		err = doCancel(arg(0), *suite)
+	case "config":
+		parse(fs, args, 0)
+		switch arg(0) {
+		case "apply":
+			if arg(1) == "" {
+				fmt.Fprint(os.Stderr, usage)
+				os.Exit(2)
+			}
+			err = doConfigApply(arg(1))
+		case "reload":
+			var out map[string]any
+			if err = call(http.MethodPost, "/api/v1/config/reload", nil, &out); err == nil {
+				fmt.Println("catalog reloaded from the store")
+			}
+		default:
+			err = doConfig()
+		}
+	case "discover":
+		pool := fs.String("pool", "global", "pool for every suite")
+		build := fs.String("build", "reactor", "name of the build payload carrying the reactor")
+		parse(fs, args, 1)
+		err = doDiscover(arg(0), *pool, *build)
 	case "artifacts":
 		get := fs.String("get", "", "download this artifact path to stdout")
 		parse(fs, args, 1)
@@ -154,240 +213,6 @@ func envOr(k, d string) string {
 	return d
 }
 
-// ---------------------------------------------------------------------------
-// commands
-// ---------------------------------------------------------------------------
-
-func doSubmit(path, id string, prio int, watch bool) error {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	// ${VAR} is expanded from the environment, matching the master's config
-	// loader; it is how a CI job injects the build URL and its sha256.
-	var sub model.Submission
-	if err := json.Unmarshal([]byte(os.ExpandEnv(string(raw))), &sub); err != nil {
-		return fmt.Errorf("%s: %w", path, err)
-	}
-	if id != "" {
-		sub.RegressionID = id
-	}
-	if prio != 0 {
-		sub.Priority = prio
-	}
-	var reg model.Regression
-	if err := call(http.MethodPost, "/api/v1/regressions", sub, &reg); err != nil {
-		return err
-	}
-	fmt.Printf("%s  submitted  %d suites\n", reg.ID, len(reg.Suites))
-	fmt.Printf("dashboard  %s/#%s\n", strings.TrimRight(master, "/"), reg.ID)
-	fmt.Printf("artifacts  %s\n\n", reg.ArtifactURI)
-	if !watch {
-		return nil
-	}
-	return doStatus(reg.ID, true)
-}
-
-type regDetail struct {
-	Regression *model.Regression `json:"regression"`
-	Runs       []*model.Run      `json:"runs"`
-	Suites     []suiteView       `json:"suites"`
-}
-
-type suiteView struct {
-	Suite    string         `json:"suite"`
-	Pool     string         `json:"pool"`
-	State    model.RunState `json:"state"`
-	Attempts int            `json:"attempts"`
-	Max      int            `json:"max_attempts"`
-	Flaky    bool           `json:"flaky"`
-	Node     string         `json:"node"`
-	Summary  model.Summary  `json:"summary"`
-	Duration float64        `json:"duration_seconds"`
-	Message  string         `json:"message"`
-	RunID    string         `json:"run_id"`
-}
-
-func doStatus(id string, watch bool) error {
-	for {
-		var d regDetail
-		if err := call(http.MethodGet, "/api/v1/regressions/"+id, nil, &d); err != nil {
-			return err
-		}
-		printRegression(&d, watch)
-		if !watch || isTerminal(d.Regression.State) {
-			if isTerminal(d.Regression.State) && d.Regression.State != model.RegPassed {
-				os.Exit(1)
-			}
-			return nil
-		}
-		time.Sleep(2 * time.Second)
-	}
-}
-
-func printRegression(d *regDetail, live bool) {
-	r := d.Regression
-	if live {
-		fmt.Print("\033[H\033[2J") // redraw in place
-	}
-	t := r.Totals
-	fmt.Printf("%s  %s  %s\n", r.ID, stateTag(string(r.State)), r.Name)
-	fmt.Printf("suites %d/%d done · %d running · %d queued   tests %d pass / %d fail / %d skip",
-		t.SuitesPassed+t.SuitesFailed+t.SuitesErrored, t.Suites,
-		t.SuitesRunning, t.SuitesQueued, t.Passed, t.Failed, t.Skipped)
-	if t.Flaky > 0 {
-		fmt.Printf("   %d flaky", t.Flaky)
-	}
-	fmt.Printf("\n%s\n\n", r.ArtifactURI)
-
-	rows := append([]suiteView(nil), d.Suites...)
-	sort.Slice(rows, func(i, j int) bool { return rows[i].Suite < rows[j].Suite })
-	fmt.Printf("  %-44s %-11s %-7s %-14s %-9s %s\n", "SUITE", "STATE", "TRY", "TESTS", "TIME", "NODE")
-	for _, s := range rows {
-		tests := "—"
-		if s.Summary.Tests > 0 {
-			tests = fmt.Sprintf("%d/%d", s.Summary.Passed, s.Summary.Tests)
-			if f := s.Summary.Failed + s.Summary.Errors; f > 0 {
-				tests += fmt.Sprintf(" (%d✗)", f)
-			}
-		}
-		try := fmt.Sprintf("%d/%d", s.Attempts, max(s.Max, 1))
-		if s.Flaky {
-			try += "*"
-		}
-		fmt.Printf("  %-44s %s %-7s %-14s %-9s %s\n",
-			trunc(s.Suite, 44), padState(string(s.State), 11), try, tests,
-			fmtDur(s.Duration), s.Node)
-		if s.Message != "" && s.State != model.RunPassed {
-			fmt.Printf("      %s\n", truncHead(s.Message, 110))
-		}
-	}
-
-	// Failing test cases from the latest attempt of each suite.
-	latest := sched.LatestPerSuite(d.Runs)
-	first := true
-	for _, s := range rows {
-		run := latest[s.Suite]
-		if run == nil || len(run.Cases) == 0 {
-			continue
-		}
-		if first {
-			fmt.Println("\nfailures:")
-			first = false
-		}
-		for _, c := range run.Cases {
-			fmt.Printf("  ✗ %s.%s\n", c.Class, c.Name)
-			if c.Message != "" {
-				fmt.Printf("      %s\n", truncHead(strings.ReplaceAll(c.Message, "\n", " "), 110))
-			}
-		}
-	}
-	fmt.Println()
-}
-
-func doList() error {
-	var resp struct {
-		Regressions []*model.Regression `json:"regressions"`
-	}
-	if err := call(http.MethodGet, "/api/v1/regressions", nil, &resp); err != nil {
-		return err
-	}
-	if len(resp.Regressions) == 0 {
-		fmt.Println("no regressions yet")
-		return nil
-	}
-	fmt.Printf("%-38s %-10s %-12s %-18s %s\n", "ID", "STATE", "SUITES", "TESTS", "SUBMITTED")
-	for _, r := range resp.Regressions {
-		t := r.Totals
-		fmt.Printf("%-38s %s %-12s %-18s %s\n", r.ID, padState(string(r.State), 10),
-			fmt.Sprintf("%d/%d", t.SuitesPassed, t.Suites),
-			fmt.Sprintf("%d pass %d fail", t.Passed, t.Failed),
-			r.SubmittedAt.Local().Format("2006-01-02 15:04:05"))
-	}
-	return nil
-}
-
-func doPools() error {
-	var resp struct {
-		Pools []sched.PoolStatus `json:"pools"`
-	}
-	if err := call(http.MethodGet, "/api/v1/pools", nil, &resp); err != nil {
-		return err
-	}
-	for _, p := range resp.Pools {
-		fmt.Printf("%s  [%s/%s]  %d/%d slots used", p.Name, p.Runtime, p.Driver, p.Used, p.Slots)
-		if p.Queued > 0 {
-			fmt.Printf("  (%d queued)", p.Queued)
-		}
-		fmt.Println()
-		if p.Error != "" {
-			fmt.Printf("  ! %s\n", p.Error)
-		}
-		for _, n := range p.Nodes {
-			status := "ready"
-			if !n.Ready {
-				status = n.Status
-			}
-			meta := make([]string, 0, len(n.Meta))
-			for k, v := range n.Meta {
-				if k != "slots" {
-					meta = append(meta, k+"="+v)
-				}
-			}
-			sort.Strings(meta)
-			fmt.Printf("  %-22s %-8s %d/%d  %s\n", n.Name, status, n.Used, n.Slots, strings.Join(meta, " "))
-			for _, s := range n.Running {
-				fmt.Printf("      ▸ %s\n", s)
-			}
-		}
-		fmt.Println()
-	}
-	return nil
-}
-
-func doCancel(id string) error {
-	var out map[string]any
-	if err := call(http.MethodPost, "/api/v1/regressions/"+id+"/cancel", nil, &out); err != nil {
-		return err
-	}
-	fmt.Printf("%s canceled\n", id)
-	return nil
-}
-
-func doArtifacts(runID, get string) error {
-	if get != "" {
-		resp, err := http.Get(strings.TrimRight(master, "/") +
-			"/api/v1/runs/" + runID + "/artifacts/" + get)
-		if err != nil {
-			return err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode >= 300 {
-			b, _ := io.ReadAll(resp.Body)
-			return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(b)))
-		}
-		_, err = io.Copy(os.Stdout, resp.Body)
-		return err
-	}
-	var resp struct {
-		Artifacts []model.ArtRef `json:"artifacts"`
-		Prefix    string         `json:"prefix"`
-		URI       string         `json:"uri"`
-	}
-	if err := call(http.MethodGet, "/api/v1/runs/"+runID+"/artifacts", nil, &resp); err != nil {
-		return err
-	}
-	fmt.Printf("%s\n", resp.URI)
-	for _, a := range resp.Artifacts {
-		fmt.Printf("  %8.1fk  %s\n", float64(a.Size)/1024, a.Path)
-	}
-	return nil
-}
-
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
-
 func call(method, path string, body, out any) error {
 	var rdr io.Reader
 	if body != nil {
@@ -423,78 +248,4 @@ func call(method, path string, body, out any) error {
 		return nil
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
-}
-
-func isTerminal(s model.RegressionState) bool {
-	switch s {
-	case model.RegPassed, model.RegFailed, model.RegErrored, model.RegCanceled:
-		return true
-	}
-	return false
-}
-
-// padState pads before coloring, so ANSI escapes do not skew column widths.
-func padState(s string, width int) string {
-	if n := width - len(s); n > 0 {
-		return stateTag(s) + strings.Repeat(" ", n)
-	}
-	return stateTag(s)
-}
-
-// stateTag colors state names when stdout is a terminal.
-func stateTag(s string) string {
-	if os.Getenv("NO_COLOR") != "" {
-		return s
-	}
-	var code string
-	switch s {
-	case "passed":
-		code = "32"
-	case "failed":
-		code = "31"
-	case "errored", "timeout":
-		code = "33"
-	case "running", "dispatched":
-		code = "36"
-	default:
-		code = "90"
-	}
-	return "\033[" + code + "m" + s + "\033[0m"
-}
-
-func fmtDur(sec float64) string {
-	if sec <= 0 {
-		return "—"
-	}
-	d := time.Duration(sec * float64(time.Second))
-	if d < time.Minute {
-		return fmt.Sprintf("%.1fs", d.Seconds())
-	}
-	return d.Round(time.Second).String()
-}
-
-// truncHead keeps the start of a message; trunc keeps the tail, which is the
-// distinctive part of a Java package name.
-func truncHead(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n-1] + "…"
-}
-
-func trunc(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	if n < 4 {
-		return s[:n]
-	}
-	return "…" + s[len(s)-n+1:]
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

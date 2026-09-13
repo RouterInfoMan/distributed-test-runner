@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="dtp-build" content="">
 <title>Distributed Test Platform</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#9881;</text></svg>">
 <style>
@@ -27,14 +28,8 @@
   main{padding:20px 22px;max-width:1400px;margin:0 auto}
   section{margin-bottom:28px}
   h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 10px}
+  h2 .edit-link{text-transform:none;letter-spacing:0;font-weight:500;margin-left:10px;font-size:12px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:10px}
-  .pools{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px}
-  .pool{padding:14px 16px}
-  .pool .top{display:flex;align-items:baseline;gap:8px;margin-bottom:2px}
-  .pool .name{font-weight:650}
-  .pool .desc{color:var(--muted);font-size:12.5px;margin-bottom:10px}
-  .node{display:grid;grid-template-columns:1fr auto;gap:4px 10px;padding:7px 0;border-top:1px solid var(--line)}
-  .node .nm{display:flex;align-items:center;gap:6px}
   .slots{grid-column:1/-1;display:flex;gap:3px;margin-top:2px}
   .slot{height:7px;flex:1;border-radius:2px;background:var(--chip)}
   .slot.on{background:var(--run)}
@@ -56,7 +51,7 @@
   .bar i{display:block;height:100%}
   .bar .p{background:var(--pass)} .bar .f{background:var(--fail)} .bar .r{background:var(--run)}
   .detail{padding:0 12px 14px}
-  .suite{display:grid;grid-template-columns:minmax(230px,2fr) 90px 110px 140px 90px 1fr;
+  .suite{display:grid;grid-template-columns:minmax(230px,2fr) 90px 110px 140px 90px 1fr 34px;
     gap:10px;align-items:center;padding:8px 4px;border-bottom:1px solid var(--line);font-size:13px}
   .suite:hover{background:var(--chip)}
   .suite .nm{cursor:pointer;font-weight:550}
@@ -77,6 +72,54 @@
   .att.passed{background:var(--pass)} .att.failed{background:var(--fail)}
   .att.errored,.att.timeout{background:var(--warn)} .att.running,.att.dispatched{background:var(--run)}
   .att.queued,.att.canceled{background:var(--idle)}
+  .slot.cap{background:var(--warn);opacity:.55}
+  button{font:inherit;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:7px;
+    padding:5px 11px;cursor:pointer}
+  button:hover{background:var(--chip)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.primary:hover{filter:brightness(1.08)}
+  button.small{padding:2px 8px;font-size:12px}
+  button.danger{color:var(--fail);border-color:var(--fail)}
+  button.danger:hover{background:var(--fail);color:#fff}
+  td.actions{text-align:right;white-space:nowrap}
+  .fails[hidden]{display:none}
+  .form{padding:16px}
+  .form .row{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end;margin-bottom:12px}
+  .form label{display:flex;flex-direction:column;gap:3px;font-size:11.5px;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+  .form input,.form select,.form textarea{font:inherit;font-size:13px;color:var(--ink);background:var(--bg);
+    border:1px solid var(--line);border-radius:6px;padding:5px 8px;min-width:120px}
+  .form input.mono,.form textarea{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px}
+  .form textarea{min-height:60px;min-width:280px}
+  .form h3{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:14px 0 8px}
+  .form table td,.form table th{padding:5px 8px}
+  .form table input,.form table select{min-width:0;width:100%}
+  .form .hint{font-size:11.5px;color:var(--muted);text-transform:none;letter-spacing:0;font-weight:400}
+  #f-msg{font-size:13px}
+  #f-msg.err{color:var(--fail)} #f-msg.ok{color:var(--pass)}
+  .agent{font-size:11px;color:var(--muted)} .agent.warn{color:var(--warn)}
+  table.grid tr.row{cursor:pointer} table.grid tr.row:hover td{background:var(--chip)}
+  table.grid td.caret{color:var(--muted);font-size:11px;text-align:center}
+  table.grid tr.sub td{background:color-mix(in srgb, var(--chip) 45%, transparent);border-bottom:1px solid var(--line);
+    padding:6px 12px 6px 34px;font-size:12.5px}
+  table.grid tr.sub.head td{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;padding-top:8px}
+  .xy{display:flex;align-items:center;gap:8px;white-space:nowrap}
+  .xy .slots{margin:0;min-width:70px;max-width:180px;flex:1}
+  .labels{font-size:11px;color:var(--muted)} .labels b{color:var(--ink);font-weight:500}
+  .cfg{padding:16px}
+  .cfg h3{display:flex;align-items:center;gap:10px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:14px 0 8px}
+  .cfg h3 button{white-space:nowrap;flex:none}
+  .cfg table{font-size:12.5px} .cfg th{white-space:nowrap}
+  .cfg td{padding:4px 6px} .cfg input,.cfg select{font:inherit;font-size:12.5px;color:var(--ink);background:var(--bg);
+    border:1px solid var(--line);border-radius:5px;padding:3px 6px;width:100%;min-width:52px}
+  .cfg input.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .cfg input[readonly]{background:transparent;border-color:transparent;font-weight:600}
+  .cfg td.act{white-space:nowrap;text-align:right}
+  .cfg .st-cell{font-size:11.5px;min-width:120px} .cfg .st-cell.err{color:var(--fail)} .cfg .st-cell.ok{color:var(--pass)}
+  .cfg textarea{width:100%;min-height:160px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;
+    color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px;margin:4px 0}
+  .banner{padding:8px 12px;border-radius:8px;background:var(--chip);font-size:12.5px;margin-bottom:10px}
+  .banner.err{color:var(--fail)}
 </style>
 </head>
 <body>
@@ -84,19 +127,37 @@
   <h1>Distributed Test Platform</h1>
   <span class="chip" id="backend">…</span>
   <span class="sp"></span>
+  <button id="compose-toggle">＋ New regression</button>
+  <button id="config-toggle">⚙ Config</button>
   <span class="muted mono" id="clock"></span>
 </header>
 <main>
+  <section id="compose" hidden>
+    <h2>New regression</h2>
+    <div class="card form" id="form"></div>
+  </section>
+  <section id="configsec" hidden>
+    <h2>Config — pools, nodes, groups, users &amp; quota rules</h2>
+    <div class="card cfg" id="cfg"></div>
+  </section>
   <section>
-    <h2>Pools &amp; slots</h2>
-    <div class="pools" id="pools"></div>
+    <h2>Pools &amp; slots <a href="#" class="edit-link" onclick="document.getElementById('config-toggle').click();return false">✎ pools &amp; node assignment in Config</a></h2>
+    <div class="card"><table class="grid">
+      <thead><tr><th style="width:22px"></th><th>Pool</th><th>Runtime</th><th>Nodes</th><th style="width:16%">Slots</th><th>Queued</th><th>Description</th></tr></thead>
+      <tbody id="pools"></tbody></table></div>
+  </section>
+  <section id="quotas-section" hidden>
+    <h2>Quota rules <a href="#" class="edit-link" onclick="document.getElementById('config-toggle').click();return false">✎ edit rules, groups &amp; users in Config</a></h2>
+    <div class="card"><table class="grid">
+      <thead><tr><th style="width:22px"></th><th>Who</th><th>Where</th><th>Limit</th><th style="width:16%">In use</th><th>Queued</th><th>Rule</th><th>Note</th></tr></thead>
+      <tbody id="quotas"></tbody></table></div>
   </section>
   <section>
     <h2>Regressions</h2>
     <div class="card"><table>
       <thead><tr>
-        <th style="width:34%">Regression</th><th>State</th><th>Suites</th>
-        <th style="width:18%">Tests</th><th>Started</th><th>Duration</th><th>Artifacts</th>
+        <th style="width:30%">Regression</th><th>State</th><th>Suites</th>
+        <th style="width:18%">Tests</th><th>User</th><th>Started</th><th>Duration</th><th></th>
       </tr></thead>
       <tbody id="regs"></tbody>
     </table><div class="empty" id="empty" hidden>No regressions submitted yet.</div></div>
@@ -112,14 +173,34 @@ const dur = s => { if(!s || s<0) return "—";
   const m=Math.floor(s/60), r=Math.round(s%60); return m<60 ? `${m}m ${r}s` : `${Math.floor(m/60)}h ${m%60}m`; };
 const ago = t => { if(!t) return "—"; const d=(Date.now()-new Date(t))/1000;
   return d<60 ? Math.round(d)+"s ago" : d<3600 ? Math.round(d/60)+"m ago" : new Date(t).toLocaleString(); };
+const live = st => ["pending","running","queued","dispatched"].includes(st);
 
+// setHTML touches the DOM only when the markup actually changed, so an update
+// that concerns one suite does not rebuild - and visibly reflow - the rest.
+function setHTML(el, html){
+  if (el.dataset.html === html) return false;
+  el.innerHTML = html; el.dataset.html = html;
+  return true;
+}
+
+// The build this page was served by; when the master reports another one
+// (rebuilt or restarted), the page reloads itself rather than run old code
+// against a new API.
+const pageBuild = (document.querySelector('meta[name="dtp-build"]')||{}).content || "";
 async function poll(){
   try{
     const r = await fetch(`/api/v1/overview?since=${revision}`);
     const d = await r.json();
+    if (pageBuild && d.build && d.build !== pageBuild) { location.reload(); return; }
     revision = d.revision; state = d; render(d);
   }catch(e){ await new Promise(r=>setTimeout(r,2000)); }
   poll();
+}
+
+async function cancel(url, what){
+  if (!confirm(`Cancel ${what}?`)) return;
+  const r = await fetch(url, {method:"POST"});
+  if (!r.ok) alert((await r.json()).error || r.statusText);
 }
 
 function render(d){
@@ -127,66 +208,206 @@ function render(d){
   const b = document.getElementById("backend");
   b.textContent = `backend: ${d.backend}${d.backend_state==="ok"?"":" ⚠"}`;
   b.title = d.backend_error || "";
-
-  document.getElementById("pools").innerHTML = (d.pools||[]).map(p=>{
-    const nodes = (p.nodes||[]).map(n=>{
-      const slots = Array.from({length:n.slots},(_,i)=>
-        `<span class="slot ${i < n.used ? "on":"off"}"></span>`).join("");
-      const meta = Object.entries(n.meta||{}).filter(([k])=>k!=="slots")
-        .map(([k,v])=>`${k}=${v}`).join(" ");
-      return `<div class="node">
-        <div class="nm"><span class="dot ${n.ready?"ready":"down"}"></span>
-          <span class="mono">${esc(n.name)}</span></div>
-        <div class="muted mono">${n.used}/${n.slots}</div>
-        <div class="slots">${slots}</div>
-        ${meta?`<div class="muted mono" style="grid-column:1/-1;font-size:11px">${esc(meta)}</div>`:""}
-        ${n.running&&n.running.length?`<div class="muted" style="grid-column:1/-1;font-size:11.5px">▸ ${
-          n.running.map(s=>esc(s.split(".").pop())).join(", ")}</div>`:""}
-      </div>`;
-    }).join("") || `<div class="muted" style="padding:10px 0">No nodes registered in this pool.</div>`;
-    return `<div class="card pool">
-      <div class="top"><span class="name">${esc(p.name)}</span>
-        <span class="chip">${esc(p.runtime)} · ${esc(p.driver)}</span>
-        <span class="sp" style="flex:1"></span>
-        <span class="mono muted">${p.used}/${p.slots} slots${p.queued?` · ${p.queued} queued`:""}</span></div>
-      <div class="desc">${esc(p.description||"")} <span class="mono">${p.slot.cpu}MHz/${p.slot.memory}MB per slot</span></div>
-      ${p.error?`<div class="st failed" style="font-size:12px">${esc(p.error)}</div>`:""}
-      ${nodes}</div>`;
-  }).join("") || `<div class="card empty">No pools configured.</div>`;
-
-  const regs = d.regressions||[];
-  document.getElementById("empty").hidden = regs.length>0;
-  document.getElementById("regs").innerHTML = regs.map(r=>{
-    const t=r.totals, total=Math.max(t.tests,1);
-    const bar = `<div class="bar">
-      <i class="p" style="width:${100*t.passed/total}%"></i>
-      <i class="f" style="width:${100*t.failed/total}%"></i></div>`;
-    const elapsed = r.started_at ? ((r.finished_at?new Date(r.finished_at):new Date())-new Date(r.started_at))/1000 : 0;
-    const row = `<tr class="reg" data-id="${esc(r.id)}">
-      <td><span class="mono">${esc(r.id)}</span>${r.name?`<div class="muted">${esc(r.name)}</div>`:""}</td>
-      <td><span class="st ${r.state}">${r.state}</span>${t.flaky?`<div class="muted" style="font-size:11px">${t.flaky} flaky</div>`:""}</td>
-      <td class="mono">${t.suites_passed}/${t.suites} ${t.suites_running?`<span class="st running">·${t.suites_running}▶</span>`:""}${t.suites_queued?`<span class="muted">·${t.suites_queued}⏸</span>`:""}</td>
-      <td>${bar}<div class="muted mono" style="font-size:11px">${t.passed} pass · ${t.failed} fail · ${t.skipped} skip</div></td>
-      <td class="muted">${ago(r.started_at||r.submitted_at)}</td>
-      <td class="mono">${dur(elapsed)}</td>
-      <td class="mono muted" style="font-size:11px">${esc(r.artifact_uri||"")}</td></tr>`;
-    const det = open.has(r.id) ? `<tr><td colspan="7" class="detail" id="d-${esc(r.id)}">
-      <div class="muted">loading…</div></td></tr>` : "";
-    return row+det;
-  }).join("");
-
-  document.querySelectorAll("tr.reg").forEach(tr=>tr.onclick=()=>{
-    const id=tr.dataset.id;
-    open.has(id) ? open.delete(id) : open.add(id);
-    render(state); if(open.has(id)) loadDetail(id);
-  });
+  renderPools(d.pools||[], d.unassigned||[]);
+  renderQuotas(d.quotas||[]);
+  renderRegressions(d.regressions||[]);
   open.forEach(loadDetail);
 }
 
+const openPools = new Set(), openGroups = new Set();
+
+// xy renders "used/total" with a slot strip: one cell per slot, lit when used.
+function xy(used, total, cap){
+  const n = Math.max(total, used, 0);
+  const cells = Array.from({length: Math.min(n, 64)}, (_, i) =>
+    `<span class="slot ${i < used ? "on" : (cap !== undefined && i >= cap ? "cap" : "off")}"></span>`).join("");
+  return `<div class="xy"><span class="mono">${used}/${total}</span><div class="slots">${cells}</div></div>`;
+}
+
+// slotText renders a node's declared slot size (meta.dtp.slot.*).
+const slotText = sl => !sl || !(sl.cores || sl.cpu) ? "" :
+  `${sl.cores ? `${sl.cores} cores` : `${sl.cpu} MHz`} / ${sl.memory}${sl.memory_max ? `→${sl.memory_max}` : ""} MB`;
+
+// nodeRows renders the expanded node list of a pool (or of the unassigned
+// group): one sub row per node with its status, slot size, labels, agent and
+// slot usage.
+function nodeRows(nodes){
+  return `<tr class="sub head"><td></td><td>Node</td><td>Status</td><td>Slot · labels</td><td>Agent</td><td>Slots</td><td>Running</td></tr>` +
+    nodes.map(n => {
+      const a = n.agent;
+      const agent = !a ? `<span class="agent">no agent</span>`
+        : a.stale ? `<span class="agent warn">⚠ ${esc(a.agent_version)} silent</span>`
+        : `<span class="agent" title="cache ${a.cache_entries} entries">${esc(a.agent_version)} ✓${a.cache_bytes ? ` · ${(a.cache_bytes/1073741824).toFixed(1)} GB cache` : ""}</span>`;
+      const labels = Object.entries(n.meta || {}).filter(([k]) => !["slots","agent","cores","memory_mb"].includes(k) && !k.startsWith("slot."))
+        .map(([k, v]) => `${esc(k)}=<b>${esc(v)}</b>`).join("  ");
+      const hw = [n.meta && n.meta.cores ? `${n.meta.cores} cores` : "", n.meta && n.meta.memory_mb ? `${(n.meta.memory_mb/1024).toFixed(0)} GB` : ""].filter(Boolean).join(", ");
+      const slot = slotText(n.slot);
+      return `<tr class="sub"><td></td>
+        <td><span class="mono">${esc(n.name)}</span>${hw ? `<div class="labels">${esc(hw)}</div>` : ""}</td>
+        <td><span class="dot ${n.ready ? "ready" : "down"}"></span> ${esc(n.ready ? "ready" : n.status)}</td>
+        <td class="labels">${slot ? `<b>${esc(slot)}</b>` : `<span class="agent warn" title="the node declares no meta.dtp.slot.*; set slot in its node.yaml">no slot size declared</span>`}${labels ? "  " + labels : ""}</td>
+        <td>${agent}</td>
+        <td>${n.slots ? xy(n.used, n.slots) : `<span class="agent warn" title="the node declares no meta.dtp.slots; set slots in its node.yaml">no slots declared</span>`}</td>
+        <td class="muted">${(n.running || []).map(s => esc(s.split(".").slice(-2).join("."))).join(", ") || "idle"}</td></tr>`;
+    }).join("");
+}
+
+function renderPools(pools, unassigned){
+  const html = pools.map(p => {
+    const virtual = p.spans && p.spans.length, open = openPools.has(p.name);
+    const nodes = p.nodes || [];
+    const ready = nodes.filter(n => n.ready).length;
+    const row = `<tr class="row" data-pool="${esc(p.name)}">
+      <td class="caret">${open ? "▾" : "▸"}</td>
+      <td><span class="mono" style="font-weight:600">${esc(p.name)}</span>${virtual ? ` <span class="chip">virtual</span>` : ""}</td>
+      <td><span class="chip">${esc(p.runtime)} · ${esc(p.driver)}</span></td>
+      <td class="mono">${virtual ? `<span class="muted">${p.spans.length} pools</span>` : `${ready}/${nodes.length}`}</td>
+      <td>${xy(p.used, p.slots)}</td>
+      <td class="mono">${p.queued ? `<span class="st queued">${p.queued}</span>` : "—"}</td>
+      <td class="muted">${esc(p.description || "")}${p.error ? `<div class="st failed" style="font-size:12px">${esc(p.error)}</div>` : ""}</td></tr>`;
+    if (!open) return row;
+    let sub;
+    if (virtual) {
+      sub = `<tr class="sub head"><td colspan="7">spans</td></tr>` + p.spans.map(m => {
+        const mp = pools.find(x => x.name === m) || {used:0, slots:0, nodes:[]};
+        return `<tr class="sub"><td colspan="3" class="mono">${esc(m)}</td><td class="mono">${(mp.nodes||[]).length}</td><td>${xy(mp.used, mp.slots)}</td><td colspan="2" class="muted">the master places on this pool's nodes</td></tr>`;
+      }).join("");
+    } else if (!nodes.length) {
+      sub = `<tr class="sub"><td colspan="7" class="muted">No nodes assigned to this pool. Assign one in ⚙ Config → Nodes.</td></tr>`;
+    } else {
+      sub = nodeRows(nodes);
+    }
+    return row + sub;
+  }).join("") || `<tr><td colspan="7" class="empty">No pools configured.</td></tr>`;
+  // Nodes the backend sees that no pool claims: visible, so a fresh node
+  // does not silently sit idle.
+  const un = unassigned || [];
+  const unHtml = !un.length ? "" : (() => {
+    const open = openPools.has("(unassigned)");
+    return `<tr class="row" data-pool="(unassigned)">
+      <td class="caret">${open ? "▾" : "▸"}</td>
+      <td><span class="agent warn">⚠ unassigned</span></td><td></td>
+      <td class="mono">${un.filter(n => n.ready).length}/${un.length}</td>
+      <td>${xy(un.reduce((a, n) => a + (n.used||0), 0), un.reduce((a, n) => a + (n.slots||0), 0))}</td><td class="mono">—</td>
+      <td class="muted">${un.map(n => esc(n.name)).join(", ")} — no new work until assigned to a pool (⚙ Config → Nodes, or <span class="mono">dtp nodes assign</span>)</td></tr>` +
+      (open ? nodeRows(un) : "");
+  })();
+  if (setHTML(document.getElementById("pools"), html + unHtml)) {
+    document.querySelectorAll("#pools tr.row").forEach(tr => tr.onclick = () => {
+      const k = tr.dataset.pool; openPools.has(k) ? openPools.delete(k) : openPools.add(k);
+      renderPools(state.pools || [], state.unassigned || []);
+    });
+  }
+}
+
+// A rule's subject and scope for people: "each member of core-devs" /
+// "core-devs together" / "carol" / "each user" / "everyone together", and
+// "anywhere" / "pool X" / "node X".
+const whoText = q => q.subject === "user" ? q.name : q.subject === "group" ? (q.together ? `${q.name} together` : `each member of ${q.name}`) : (q.together ? "everyone together" : "each user");
+const whereText = q => q.scope === "pool" ? `pool ${q.target}` : q.scope === "node" ? `node ${q.target}` : "anywhere";
+
+function renderQuotas(all){
+  document.getElementById("quotas-section").hidden = all.length === 0;
+  const html = all.map(q => {
+    const open = openGroups.has(q.key), users = q.users || [], single = q.together || q.subject === "user";
+    const row = `<tr class="row" data-group="${esc(q.key)}">
+      <td class="caret">${single ? "" : (open ? "▾" : "▸")}</td>
+      <td><span style="font-weight:600">${esc(whoText(q))}</span>${q.subject === "global" ? ` <span class="chip">everyone</span>` : q.subject === "group" ? ` <span class="chip">group</span>` : ""}</td>
+      <td class="mono">${esc(whereText(q))}</td>
+      <td class="mono">${q.max_slots === 0 ? `<span class="st failed">0 · forbidden</span>` : q.max_slots}</td>
+      <td>${single ? xy(q.used, q.max_slots) : `<span class="mono">${q.used}</span> <span class="muted">across ${users.length} user${users.length === 1 ? "" : "s"}</span>`}</td>
+      <td class="mono">${q.queued ? `<span class="st queued">${q.queued}</span>` : "—"}</td>
+      <td class="mono muted" style="font-size:11px">${esc(q.key)}</td>
+      <td class="muted">${esc(q.note || "")}</td></tr>`;
+    if (!open || single) return row;
+    const sub = users.length
+      ? `<tr class="sub head"><td></td><td>User</td><td colspan="2">Slots in use</td><td>Cap</td><td>Queued</td><td colspan="2">Governed by</td></tr>` +
+        users.map(u => `<tr class="sub"><td></td><td class="mono">${esc(u.user || "(anonymous)")}</td>
+          <td colspan="2">${u.cap ? xy(u.used, u.cap) : `<span class="mono">${u.used}</span>`}</td>
+          <td class="mono">${u.cap === 0 ? `<span class="st failed">0</span>` : u.cap}</td>
+          <td class="mono">${u.queued || "—"}</td>
+          <td colspan="2" class="mono muted" style="font-size:11px">${u.via ? `${esc(u.via)} <span class="chip" title="a more specific rule applies to this user">overrides</span>` : "this rule"}</td></tr>`).join("")
+      : `<tr class="sub"><td colspan="8" class="muted">Nobody this rule governs has run anything yet.</td></tr>`;
+    return row + sub;
+  }).join("");
+  if (setHTML(document.getElementById("quotas"), html)) {
+    document.querySelectorAll("#quotas tr.row").forEach(tr => tr.onclick = () => {
+      const k = tr.dataset.group; openGroups.has(k) ? openGroups.delete(k) : openGroups.add(k);
+      renderQuotas(state.quotas || []);
+    });
+  }
+}
+
+// Regression rows are keyed by id and kept between updates: a changed row
+// gets new cells, an unchanged one is left alone, and an open detail row stays
+// where it is instead of collapsing to "loading…" and back.
+const rows = new Map(); // id -> {row, det}
+
+function regressionRow(r){
+  const t=r.totals, total=Math.max(t.tests,1);
+  const bar = `<div class="bar">
+    <i class="p" style="width:${100*t.passed/total}%"></i>
+    <i class="f" style="width:${100*t.failed/total}%"></i></div>`;
+  const elapsed = r.started_at ? ((r.finished_at?new Date(r.finished_at):new Date())-new Date(r.started_at))/1000 : 0;
+  return `
+    <td><span class="mono">${esc(r.id)}</span>${r.name?`<div class="muted">${esc(r.name)}</div>`:""}${(r.builds||[]).length?`<div class="muted" style="font-size:11px">${r.builds.map(b=>`<span class="chip" title="${esc(b.url||"")}">${esc(b.name)}${b.version?" "+esc(b.version):""}${b.id?" · "+esc(b.id):""}</span>`).join(" ")}</div>`:""}</td>
+    <td><span class="st ${r.state}">${r.state}</span>${t.flaky?`<div class="muted" style="font-size:11px">${t.flaky} flaky</div>`:""}</td>
+    <td class="mono">${t.suites_passed}/${t.suites} ${t.suites_running?`<span class="st running">·${t.suites_running}▶</span>`:""}${t.suites_queued?`<span class="muted">·${t.suites_queued}⏸</span>`:""}</td>
+    <td>${bar}<div class="muted mono" style="font-size:11px">${t.passed} pass · ${t.failed} fail · ${t.skipped} skip</div></td>
+    <td class="mono">${esc(r.user||"")}${(r.groups||[]).length?`<div class="muted" style="font-size:11px">${r.groups.map(esc).join(", ")}</div>`:""}</td>
+    <td class="muted">${ago(r.started_at||r.submitted_at)}</td>
+    <td class="mono">${dur(elapsed)}</td>
+    <td class="actions">${live(r.state)?`<button class="small danger" data-cancel="1">cancel</button>`:""}</td>`;
+}
+
+function renderRegressions(regs){
+  const tbody = document.getElementById("regs");
+  document.getElementById("empty").hidden = regs.length>0;
+  const keep = new Set();
+  let anchor = null;
+  // place puts a node right after the previous one, moving it only if it is
+  // not already there.
+  const place = node => {
+    const next = anchor ? anchor.nextSibling : tbody.firstChild;
+    if (next !== node) tbody.insertBefore(node, next);
+    anchor = node;
+  };
+  for (const r of regs) {
+    keep.add(r.id);
+    let e = rows.get(r.id);
+    if (!e) {
+      e = { row: document.createElement("tr"), det: null };
+      e.row.className = "reg"; e.row.dataset.id = r.id;
+      e.row.onclick = ev => {
+        if (ev.target.closest("button")) return;
+        open.has(r.id) ? open.delete(r.id) : open.add(r.id);
+        renderRegressions(state.regressions||[]);
+        if (open.has(r.id)) loadDetail(r.id);
+      };
+      rows.set(r.id, e);
+    }
+    if (setHTML(e.row, regressionRow(r))) {
+      const btn = e.row.querySelector("[data-cancel]");
+      if (btn) btn.onclick = ev => { ev.stopPropagation(); cancel(`/api/v1/regressions/${encodeURIComponent(r.id)}/cancel`, `regression ${r.id}`); };
+    }
+    place(e.row);
+    if (open.has(r.id)) {
+      if (!e.det) {
+        e.det = document.createElement("tr");
+        e.det.innerHTML = `<td colspan="8" class="detail"><div class="muted">loading…</div></td>`;
+      }
+      place(e.det);
+    } else if (e.det) { e.det.remove(); e.det = null; }
+  }
+  for (const [id, e] of rows) if (!keep.has(id)) { e.row.remove(); if (e.det) e.det.remove(); rows.delete(id); }
+}
+
 async function loadDetail(id){
-  const el = document.getElementById("d-"+id); if(!el) return;
+  const e = rows.get(id); if(!e || !e.det) return;
+  const el = e.det.firstElementChild;
   const d = await (await fetch(`/api/v1/regressions/${encodeURIComponent(id)}`)).json();
-  el.innerHTML = (d.suites||[]).map(s=>{
+  if (!e.det.isConnected) return; // closed while the fetch was in flight
+  const html = (d.suites||[]).map(s=>{
     const key=id+"/"+s.suite;
     const attempts=(s.runs||[]).sort((a,b)=>a.attempt-b.attempt)
       .map(r=>`<span class="att ${r.state}" title="attempt ${r.attempt}: ${r.state}">${r.attempt}</span>`).join("");
@@ -197,39 +418,452 @@ async function loadDetail(id){
       <div class="attempts">${attempts}</div>
       <div class="mono muted">${sm.tests?`${sm.passed}/${sm.tests} pass${sm.failed+sm.errors?` · <span class="st failed">${sm.failed+sm.errors} fail</span>`:""}`:"—"}</div>
       <div class="mono muted">${dur(s.duration_seconds)}</div>
-      <div class="muted mono" style="font-size:11.5px">${esc(s.node||"")} ${s.message?`· ${esc(s.message)}`:""}</div>
-    </div>${openSuites.has(key)?`<div class="fails" id="f-${esc(key)}">loading…</div>`:""}`;
+      <div class="muted mono msg" style="font-size:11.5px">${esc(s.node||"")} ${s.message?`· ${esc(s.message)}`:""}</div>
+      <div class="actions">${live(s.state)?`<button class="small danger" data-cancel-suite="${esc(s.suite)}" title="cancel this suite">✕</button>`:""}</div>
+    </div><div class="fails" data-f="${esc(key)}"${openSuites.has(key)?"":" hidden"}></div>`;
   }).join("") || `<div class="muted">No suites.</div>`;
 
-  el.querySelectorAll(".nm[data-k]").forEach(n=>n.onclick=e=>{
-    e.stopPropagation();
-    const k=n.dataset.k;
-    openSuites.has(k)?openSuites.delete(k):openSuites.add(k);
-    loadDetail(id);
-  });
+  if (setHTML(el, html)) {
+    el.querySelectorAll(".nm[data-k]").forEach(n=>n.onclick=ev=>{
+      ev.stopPropagation();
+      const k=n.dataset.k;
+      openSuites.has(k)?openSuites.delete(k):openSuites.add(k);
+      loadDetail(id);
+    });
+    el.querySelectorAll("[data-cancel-suite]").forEach(b=>b.onclick=ev=>{
+      ev.stopPropagation();
+      const suite=b.dataset.cancelSuite;
+      cancel(`/api/v1/regressions/${encodeURIComponent(id)}/suites/${encodeURIComponent(suite)}/cancel`, `suite ${suite}`);
+    });
+  }
+  const panels = {};
+  el.querySelectorAll(".fails[data-f]").forEach(p=>panels[p.dataset.f]=p);
   (d.suites||[]).forEach(s=>{
-    const k=id+"/"+s.suite;
-    if(openSuites.has(k)) loadSuite(k, s);
+    const k=id+"/"+s.suite, panel=panels[k];
+    if(!panel) return;
+    panel.hidden=!openSuites.has(k);
+    if(openSuites.has(k)) loadSuite(panel, s);
   });
 }
 
-async function loadSuite(key, s){
-  const el=document.getElementById("f-"+key);
-  if(!el) return;
+async function loadSuite(el, s){
   const latest=(s.runs||[]).reduce((a,b)=>(!a||b.attempt>a.attempt)?b:a,null);
-  if(!latest){ el.textContent="no attempts yet"; return; }
+  if(!latest){ setHTML(el, `<span class="muted">no attempts yet</span>`); return; }
   let arts=[];
   try{ arts=(await (await fetch(`/api/v1/runs/${latest.id}/artifacts`)).json()).artifacts||[]; }catch(e){}
   const cases=(latest.cases||[]).slice(0,25).map(c=>`<div class="fail-case">
       <div class="t mono">${esc(c.class)}.${esc(c.name)}</div>
       ${c.message?`<div class="muted">${esc(c.message)}</div>`:""}
       ${c.details?`<pre>${esc(c.details)}</pre>`:""}</div>`).join("");
-  el.innerHTML = `${cases||`<div class="muted">No failing test cases recorded.</div>`}
+  setHTML(el, `${cases||`<div class="muted">No failing test cases recorded.</div>`}
     <div class="arts">${arts.map(a=>
       `<a href="/api/v1/runs/${latest.id}/artifacts/${a.path.split("/").map(encodeURIComponent).join("/")}"
         target="_blank">${esc(a.path)} <span class="muted">${(a.size/1024).toFixed(1)}k</span></a>`).join("")
-      || `<span class="muted">no artifacts</span>`}</div>`;
+      || `<span class="muted">no artifacts</span>`}</div>`);
 }
+// ---------------------------------------------------------------------------
+// composer: build a submission from what the cluster offers
+// ---------------------------------------------------------------------------
+let catalog = null, draft = null;
+const composeEl = document.getElementById("compose");
+document.getElementById("compose-toggle").onclick = async () => {
+  composeEl.hidden = !composeEl.hidden;
+  if (!composeEl.hidden && !catalog) {
+    catalog = await (await fetch("/api/v1/catalog")).json();
+    draft = blankDraft();
+    renderForm();
+  }
+};
+
+const blankDraft = () => ({ name: "", user: localStorage.getItem("dtp.user") || "", priority: 50, labels: {},
+  pool: (catalog.pools.find(p=>p.virtual)||catalog.pools[0]||{}).name || "", timeout: "20m", retries: 0,
+  harness: "", requires: {}, env: {}, build: [], suites: [] });
+
+// applyTemplate loads a submission file into the draft; ${VAR} placeholders
+// stay visible for the user to replace.
+function applyTemplate(t){
+  const s = t.submission, d = s.defaults || {};
+  const env = Object.assign({}, d.env || {});
+  const harness = env.DTP_HARNESS || ""; delete env.DTP_HARNESS;
+  draft = { name: s.name || t.name, user: draft.user, priority: s.priority || 50, labels: s.labels || {},
+    pool: d.pool || draft.pool, timeout: d.timeout || "20m", retries: d.retries || 0, harness,
+    requires: Object.assign({}, d.requires || {}), env,
+    build: (d.build || []).map(b=>Object.assign({id:"", product:"", url:"", sha256:"", unpack:""}, b)),
+    suites: s.suites.map(su=>({ on: true, name: su.name, pool: su.pool || "", timeout: su.timeout || "",
+      retries: su.retries ?? "", requires: Object.entries(su.requires || {}).map(([k,v])=>`${k}=${v}`).join(" "),
+      env: su.env || {} })) };
+}
+
+function renderForm(){
+  const c = catalog, d = draft;
+  const opt = (vals, cur, any) => (any?`<option value="">${any}</option>`:"") +
+    vals.map(v=>`<option value="${esc(v)}"${v===cur?" selected":""}>${esc(v)}</option>`).join("");
+  const metaKeys = [...new Set([...Object.keys(c.meta||{}), ...Object.keys(d.requires)])].sort();
+  const requires = metaKeys.map(k=>`<label>${esc(k)}
+      <select data-req="${esc(k)}">${opt([...new Set([...(c.meta[k]||[]), ...(d.requires[k]?[d.requires[k]]:[])])], d.requires[k]||"", "any")}</select></label>`).join("");
+  const poolOpts = c.pools.map(p=>p.name);
+  // The repository picker: "latest of <product>", each manifested build, or a URL.
+  const products = [...new Set(c.builds.filter(b=>b.manifest).map(b=>b.manifest.product))];
+  const pickOpts = b => {
+    const cur = b.id ? (b.id==="latest" ? `latest:${b.product||b.name}` : `id:${b.id}`) : (b.url ? `url:${b.url}` : "");
+    const o = [];
+    products.forEach(p => o.push(`<option value="latest:${esc(p)}"${cur===`latest:${p}`?" selected":""}>latest ${esc(p)}</option>`));
+    c.builds.forEach(x => { const m = x.manifest;
+      o.push(m ? `<option value="id:${esc(m.id)}"${cur===`id:${m.id}`?" selected":""}>${esc(m.product)} ${esc(m.version)} · ${esc(m.id)} · ${(x.size/1048576).toFixed(0)} MB</option>`
+               : `<option value="url:${esc(x.url)}"${cur===`url:${x.url}`?" selected":""}>${esc(x.url.split("/").pop())} · ${(x.size/1048576).toFixed(0)} MB (no manifest)</option>`); });
+    o.push(`<option value=""${cur===""||(b.url&&!c.builds.some(x=>x.url===b.url)&&!b.id)?" selected":""}>URL…</option>`);
+    return o.join("");
+  };
+  const builds = d.build.map((b,i)=>`<tr>
+      <td><input class="mono" data-b="${i}" data-f="name" value="${esc(b.name||"")}" placeholder="product"></td>
+      <td><select data-b="${i}" data-f="pick">${pickOpts(b)}</select></td>
+      <td><input class="mono" data-b="${i}" data-f="url" value="${esc(b.url||"")}" placeholder="s3://… or https://…"${b.id?" disabled":""}></td>
+      <td><input class="mono" data-b="${i}" data-f="sha256" value="${esc(b.sha256||"")}" placeholder="${b.id?"from manifest":"optional"}"${b.id?" disabled":""}></td>
+      <td><select data-b="${i}" data-f="unpack">${opt(["","zip","tar.gz","tar","auto"], b.unpack||"")}</select></td>
+      <td><button class="small" data-delb="${i}">✕</button></td></tr>`).join("");
+  const suites = d.suites.map((su,i)=>`<tr>
+      <td><input type="checkbox" data-s="${i}" data-f="on"${su.on?" checked":""}></td>
+      <td><input class="mono" data-s="${i}" data-f="name" value="${esc(su.name)}"></td>
+      <td><select data-s="${i}" data-f="pool">${opt(poolOpts, su.pool, "default")}</select></td>
+      <td><input class="mono" data-s="${i}" data-f="requires" value="${esc(su.requires)}" placeholder="rcp_version=4.36"></td>
+      <td><input data-s="${i}" data-f="timeout" value="${esc(su.timeout)}" placeholder="${esc(d.timeout)}"></td>
+      <td><input data-s="${i}" data-f="retries" type="number" min="0" value="${esc(su.retries)}" placeholder="${d.retries}"></td>
+      <td><button class="small" data-dels="${i}">✕</button></td></tr>`).join("");
+  const envText = Object.entries(d.env).map(([k,v])=>`${k}=${v}`).join("\n");
+
+  document.getElementById("form").innerHTML = `
+    <div class="row">
+      <label>Template <select id="f-template">${opt(c.templates.map(t=>t.name), "", "blank")}</select></label>
+      <label>Name <input id="f-name" value="${esc(d.name)}" placeholder="egit-nightly"></label>
+      <label>User <input id="f-user" list="users" value="${esc(d.user)}" placeholder="who is charged"></label>
+      <label>Priority <input id="f-priority" type="number" min="0" max="100" value="${d.priority}" style="min-width:70px"></label>
+    </div>
+    <h3>Defaults for every suite</h3>
+    <div class="row">
+      <label>Pool <select id="f-pool">${opt(poolOpts, d.pool)}</select></label>
+      <label>Timeout <input id="f-timeout" value="${esc(d.timeout)}" style="min-width:70px"></label>
+      <label>Retries <input id="f-retries" type="number" min="0" value="${d.retries}" style="min-width:70px"></label>
+      <label>Harness <select id="f-harness">${opt(c.harnesses, d.harness, "auto")}</select></label>
+    </div>
+    <h3>Targets <span class="hint">— node requirements, from meta.dtp.* of the registered nodes</span></h3>
+    <div class="row">${requires || `<span class="hint">no nodes registered yet</span>`}</div>
+    <h3>Build payloads <span class="hint">— from the build repository (version, checksum and unpack come from the manifest), or a URL; fetched once per node into the cache</span></h3>
+    <div style="overflow-x:auto"><table><thead><tr><th>Name</th><th style="width:34%">Build</th><th style="width:26%">URL</th><th>sha256</th><th>Unpack</th><th></th></tr></thead>
+      <tbody>${builds}</tbody></table></div>
+    <div class="row"><button class="small" id="f-addbuild">＋ payload</button>
+      <label>Env <span class="hint">KEY=value per line</span><textarea id="f-env">${esc(envText)}</textarea></label></div>
+    <h3>Suites <span class="hint">— each one takes one slot; per-suite fields override the defaults</span></h3>
+    <div style="overflow-x:auto"><table><thead><tr><th></th><th style="width:36%">Suite</th><th>Pool</th><th>Targets</th><th>Timeout</th><th>Retries</th><th></th></tr></thead>
+      <tbody>${suites}</tbody></table></div>
+    <div class="row">
+      <input class="mono" id="f-newsuite" list="suites" placeholder="org.eclipse.egit.core.test" style="min-width:300px">
+      <button class="small" id="f-addsuite">＋ suite</button>
+      <span class="sp" style="flex:1"></span>
+      <button class="primary" id="f-submit">Submit regression</button>
+      <span id="f-msg"></span>
+    </div>
+    <datalist id="users">${c.users.map(u=>`<option value="${esc(u)}">`).join("")}</datalist>
+    <datalist id="suites">${c.suites.map(u=>`<option value="${esc(u)}">`).join("")}</datalist>
+`;
+  bindForm();
+}
+
+// readForm pulls the editable fields back into the draft before a re-render
+// or a submit, so nothing typed is lost.
+function readForm(){
+  const $ = id => document.getElementById(id);
+  const d = draft;
+  d.name = $("f-name").value.trim(); d.user = $("f-user").value.trim();
+  d.priority = parseInt($("f-priority").value) || 0;
+  d.pool = $("f-pool").value; d.timeout = $("f-timeout").value.trim();
+  d.retries = parseInt($("f-retries").value) || 0; d.harness = $("f-harness").value;
+  d.requires = {};
+  document.querySelectorAll("[data-req]").forEach(el=>{ if (el.value) d.requires[el.dataset.req] = el.value; });
+  d.env = {};
+  $("f-env").value.split("\n").forEach(line=>{ const i=line.indexOf("="); if(i>0) d.env[line.slice(0,i).trim()] = line.slice(i+1); });
+  document.querySelectorAll("[data-b]").forEach(el=>{
+    const b = d.build[+el.dataset.b], f = el.dataset.f;
+    if (f !== "pick") { if (!el.disabled) b[f] = el.value.trim(); return; }
+    const v = el.value;
+    if (v.startsWith("latest:")) { b.id = "latest"; b.product = v.slice(7); b.url = ""; b.sha256 = ""; }
+    else if (v.startsWith("id:")) { b.id = v.slice(3); b.product = ""; b.url = ""; b.sha256 = ""; }
+    else if (v.startsWith("url:")) { b.id = ""; b.product = ""; b.url = v.slice(4); }
+    else { b.id = ""; b.product = ""; }
+  });
+  document.querySelectorAll("[data-s]").forEach(el=>{
+    const su = d.suites[+el.dataset.s], f = el.dataset.f;
+    su[f] = f==="on" ? el.checked : el.value.trim();
+  });
+}
+
+function bindForm(){
+  const $ = id => document.getElementById(id);
+  $("f-template").onchange = e => {
+    readForm();
+    const t = catalog.templates.find(t=>t.name===e.target.value);
+    if (t) applyTemplate(t); else draft = Object.assign(blankDraft(), {user: draft.user});
+    renderForm();
+  };
+  $("f-addbuild").onclick = () => { readForm(); draft.build.push({name:"", id:"", product:"", url:"", sha256:"", unpack:""}); renderForm(); };
+  document.querySelectorAll("[data-b][data-f=pick]").forEach(el=>el.onchange=()=>{ readForm(); renderForm(); });
+  $("f-addsuite").onclick = () => {
+    readForm();
+    const name = $("f-newsuite").value.trim();
+    if (!name) return;
+    if (!draft.suites.some(s=>s.name===name)) draft.suites.push({on:true, name, pool:"", timeout:"", retries:"", requires:"", env:{}});
+    renderForm();
+  };
+  $("f-newsuite").onkeydown = e => { if (e.key==="Enter") { e.preventDefault(); $("f-addsuite").click(); } };
+  document.querySelectorAll("[data-delb]").forEach(b=>b.onclick=()=>{ readForm(); draft.build.splice(+b.dataset.delb,1); renderForm(); });
+  document.querySelectorAll("[data-dels]").forEach(b=>b.onclick=()=>{ readForm(); draft.suites.splice(+b.dataset.dels,1); renderForm(); });
+  $("f-submit").onclick = submitDraft;
+}
+
+// toSubmission is the exact JSON the CLI would send.
+function toSubmission(){
+  const d = draft;
+  const kv = s => Object.fromEntries(s.split(/\s+/).filter(Boolean).map(p=>{ const i=p.indexOf("="); return [p.slice(0,i), p.slice(i+1)]; }).filter(([k])=>k));
+  const env = Object.assign({}, d.env);
+  if (d.harness) env.DTP_HARNESS = d.harness;
+  const sub = { name: d.name, user: d.user, priority: d.priority, labels: d.labels,
+    defaults: { pool: d.pool, timeout: d.timeout, retries: d.retries, requires: d.requires, env,
+      build: d.build.filter(b=>b.url||b.id).map(b=> b.id
+        ? { name: b.name || "product", id: b.id, product: b.product || undefined, unpack: b.unpack || undefined }
+        : { name: b.name || "product", url: b.url, sha256: b.sha256 || undefined, unpack: b.unpack || undefined }) },
+    suites: d.suites.filter(s=>s.on && s.name).map(s=>{
+      const su = { name: s.name };
+      if (s.pool) su.pool = s.pool;
+      if (s.requires) su.requires = kv(s.requires);
+      if (s.timeout) su.timeout = s.timeout;
+      if (s.retries !== "" && s.retries !== null && s.retries !== undefined) su.retries = parseInt(s.retries);
+      if (s.env && Object.keys(s.env).length) su.env = s.env;
+      return su; }) };
+  return sub;
+}
+
+async function submitDraft(){
+  readForm();
+  const msg = document.getElementById("f-msg");
+  const sub = toSubmission();
+  if (!sub.suites.length) { msg.className="err"; msg.textContent = "select at least one suite"; return; }
+  if (JSON.stringify(sub).includes("${")) { msg.className="err"; msg.textContent = "replace the ${…} placeholders in the build payloads"; return; }
+  msg.className=""; msg.textContent = "submitting…";
+  try {
+    const r = await fetch("/api/v1/regressions", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(sub) });
+    const body = await r.json();
+    if (!r.ok) throw new Error(body.error || r.statusText);
+    localStorage.setItem("dtp.user", sub.user);
+    msg.className="ok"; msg.innerHTML = `submitted <span class="mono">${esc(body.id)}</span> · ${sub.suites.length} suites as ${esc(sub.user||"(anonymous)")}`;
+    open.add(body.id);
+  } catch (e) { msg.className="err"; msg.textContent = e.message; }
+}
+
+// ---------------------------------------------------------------------------
+// config editor: the catalog (pools, nodes, groups, users, quota rules) as stored, edited in place
+// ---------------------------------------------------------------------------
+let cfgState = null;
+const cfgEl = document.getElementById("configsec");
+document.getElementById("config-toggle").onclick = () => { cfgEl.hidden = !cfgEl.hidden; if (!cfgEl.hidden) { loadConfig(); cfgEl.scrollIntoView({behavior:"smooth"}); } };
+
+async function loadConfig(){
+  cfgState = await (await fetch("/api/v1/config")).json();
+  cfgState.quotas = cfgState.quotas || [];
+  cfgState.quotas.forEach(r => r._key = ruleKeyOf(r)); // the key as loaded; edits replace that rule
+  renderConfig();
+}
+
+const RUNTIMES = ["container","process"], DRIVERS = ["", "docker","podman","exec","raw_exec"], UNPACKS = ["", "zip","tar.gz","tar","auto"];
+const NONE = "(unassigned)";
+const optList = (vals, cur) => vals.map(v=>`<option value="${esc(v)}"${v===cur?" selected":""}>${esc(v||"(default)")}</option>`).join("");
+
+function renderConfig(){
+  const c = cfgState, groups = [...(c.groups||[])], rules = [...(c.quotas||[])];
+  const poolRow = (p, i) => `<tr data-cfgpool="${i}">
+    <td><input class="mono" data-f="name" value="${esc(p.name)}" ${p._new?'placeholder="name"':"readonly"}></td>
+    <td><select data-f="runtime"><option value=""${!p.runtime?" selected":""}>inherit</option>${optList(RUNTIMES, p.runtime||"")}</select></td>
+    <td><select data-f="task_driver">${optList(DRIVERS, p.task_driver||"")}</select></td>
+    <td><input class="mono" data-f="spans" value="${esc((p.spans||[]).join(", "))}" placeholder="virtual: member pools"></td>
+    <td><input class="mono" data-f="image" value="${esc(p.default?.image||"")}"></td>
+    <td><input class="mono" data-f="command" value="${esc((p.default?.command||[]).join(" "))}"></td>
+    <td><input data-f="description" value="${esc(p.description||"")}"></td>
+    <td class="act"><button class="small" data-save="pool">save</button> <button class="small" data-json="pool">json</button> ${p._new?"":`<button class="small danger" data-del="pool">✕</button>`}</td>
+    <td class="st-cell"></td></tr>
+    <tr class="jsonrow" hidden><td colspan="9"><textarea data-jsonfor="${i}">${esc(JSON.stringify(stripNew(p), null, 2))}</textarea>
+      <button class="small" data-savejson="pool">save json</button> <span class="hint">every field of the pool, including constraints, runner_command, cache_dir, host_volume, docker_network</span></td></tr>`;
+  // Nodes: the catalog's assignment rows, joined with what the scheduler
+  // sees live (status, slots, slot size, agent) for the same names.
+  const concrete = c.pools.filter(p => !(p.spans||[]).length && !p._new).map(p => p.name);
+  const liveNodes = {};
+  (state?.pools || []).forEach(p => (p.nodes || []).forEach(n => liveNodes[n.name] = n));
+  (state?.unassigned || []).forEach(n => liveNodes[n.name] = n);
+  const nodes = [...(c.nodes||[])];
+  Object.keys(liveNodes).filter(n => !nodes.some(x => x.name === n)).sort().forEach(n => nodes.push({name: n, pool: "", _live: true}));
+  const nodeRow = (n, i) => { const l = liveNodes[n.name]; return `<tr data-cfgnode="${i}">
+    <td><input class="mono" data-f="name" value="${esc(n.name)}" ${n._new?'placeholder="rcp-hp-2"':"readonly"}></td>
+    <td><select data-f="pool"><option value=""${!n.pool?" selected":""}>${NONE}</option>${optList(concrete, n.pool||"")}</select></td>
+    <td>${!l ? `<span class="muted">not seen by the backend</span>` : `<span class="dot ${l.ready ? "ready" : "down"}"></span> ${esc(l.ready ? "ready" : l.status)}`}</td>
+    <td class="mono">${l ? `${l.used}/${l.slots}` : "—"}</td>
+    <td class="mono muted">${l ? (slotText(l.slot) || `<span class="agent warn">none declared</span>`) : "—"}</td>
+    <td class="agent">${!l ? "" : !l.agent ? "no agent" : l.agent.stale ? `⚠ ${esc(l.agent.agent_version)} silent` : `${esc(l.agent.agent_version)} ✓`}</td>
+    <td class="act"><button class="small" data-save="node">${n._new||n._live?"add":"save"}</button> ${n._new||n._live?"":`<button class="small danger" data-del="node" title="forget the node; it comes back unassigned on its next heartbeat">✕</button>`}</td>
+    <td class="st-cell"></td></tr>`; };
+  const users = [...(c.users||[])];
+  const membersOf = name => users.filter(u => (u.groups||[]).includes(name)).map(u=>u.name);
+  const groupRow = (g, i) => `<tr data-cfggroup="${i}">
+    <td><input class="mono" data-f="name" value="${esc(g.name)}" ${g._new?'placeholder="name"':"readonly"}></td>
+    <td><input data-f="description" value="${esc(g.description||"")}" placeholder="what these people are"></td>
+    <td class="muted mono" style="font-size:12px">${g._new?"—":(membersOf(g.name).map(esc).join(", ")||"nobody yet")}</td>
+    <td class="act"><button class="small" data-save="group">save</button> ${g._new?"":`<button class="small danger" data-del="group" title="removes its memberships and its quota rules too">✕</button>`}</td>
+    <td class="st-cell"></td></tr>`;
+  const groupNames = groups.map(g=>g.name), userNames = users.map(u=>u.name);
+  const userRow = (u, i) => `<tr data-cfguser="${i}">
+    <td><input class="mono" data-f="name" value="${esc(u.name)}" ${u._new?'placeholder="login"':"readonly"}></td>
+    <td><input data-f="display_name" value="${esc(u.display_name||"")}" placeholder="Full name"></td>
+    <td><input data-f="email" value="${esc(u.email||"")}" placeholder="optional"></td>
+    <td><input class="mono" data-f="groups" value="${esc((u.groups||[]).join(", "))}" placeholder="none" list="groupnames"></td>
+    <td class="act"><button class="small" data-save="user">save</button> ${u._new?"":`<button class="small danger" data-del="user" title="removes their memberships and their own quota rules too">✕</button>`}</td>
+    <td class="st-cell"></td></tr>`;
+  // Quota rules: subject × scope → limit. The row keeps the key it was
+  // loaded with, so editing the subject or scope replaces that rule.
+  const allNodes = [...new Set([...(c.nodes||[]).map(n=>n.name), ...Object.keys(liveNodes)])].sort();
+  const ruleRow = (r, i) => `<tr data-cfgrule="${i}" data-key="${esc(r._key || "")}">
+    <td><select data-f="subject">${optList(["global","group","user"], r.subject||"global").replace('>global<', '>everyone<')}</select></td>
+    <td><input class="mono" data-f="name" value="${esc(r.name||"")}" placeholder="${r.subject==="user"?"user":r.subject==="group"?"group":"—"}" list="${r.subject==="user"?"usernames":"groupnames"}" ${r.subject==="global"||!r.subject?"disabled":""}></td>
+    <td><select data-f="together" ${r.subject==="user"?"disabled":""}><option value=""${!r.together?" selected":""}>each user</option><option value="1"${r.together?" selected":""}>all together</option></select></td>
+    <td><select data-f="scope">${optList(["global","pool","node"], r.scope||"global").replace('>global<', '>anywhere<')}</select></td>
+    <td><select data-f="target" ${r.scope==="global"||!r.scope?"disabled":""}>${r.scope==="pool" ? optList(c.pools.map(p=>p.name), r.target||"") : r.scope==="node" ? optList(allNodes, r.target||"") : "<option value=''>—</option>"}</select></td>
+    <td><input type="number" min="0" data-f="max_slots" value="${r.max_slots ?? ""}" placeholder="0 = forbid" style="min-width:80px"></td>
+    <td><input data-f="note" value="${esc(r.note||"")}" placeholder="why"></td>
+    <td class="act"><button class="small" data-save="rule">${r._new?"add":"save"}</button> ${r._new?"":`<button class="small danger" data-del="rule">✕</button>`}</td>
+    <td class="st-cell"></td></tr>`;
+  document.getElementById("cfg").innerHTML = `
+    ${c.store_error?`<div class="banner err">stored catalog rejected, previous one in force: ${esc(c.store_error)}</div>`:""}
+    <div class="banner">Source: <b>${esc(c.source)}</b>${c.source==="postgres"?" — tables <span class=\"mono\">pools</span>, <span class=\"mono\">nodes</span>, <span class=\"mono\">groups</span>, <span class=\"mono\">users</span>, <span class=\"mono\">group_members</span>, <span class=\"mono\">quota_rules</span>":" — catalog.json in the state dir"}.
+      Every save here is validated as a whole, written to the store and applied live; saving the same thing twice changes nothing.
+      Edited the store directly? <button class="small" id="cfg-reload" title="POST /api/v1/config/reload: re-read the tables">↻ reload from store</button></div>
+    <h3>Pools <button class="small" id="cfg-addpool">＋ pool</button> <span class="hint">how suites run on a pool's nodes; slot sizes are on the nodes, not here. A virtual pool needs only a name and spans.</span></h3>
+    <div style="overflow-x:auto"><table><thead><tr><th>Name</th><th>Runtime</th><th>Driver</th><th>Spans</th><th>Image</th><th>Command</th><th>Description</th><th></th><th></th></tr></thead>
+      <tbody>${c.pools.map(poolRow).join("")}</tbody></table></div>
+    <h3>Nodes <button class="small" id="cfg-addnode">＋ node</button> <span class="hint">which pool each worker serves. A node registers itself on its first heartbeat (in the pool its node.yaml suggests); change the pool here, or leave it unassigned to park it. Slots and slot size come from the node's node.yaml.</span></h3>
+    <div style="overflow-x:auto"><table><thead><tr><th>Node</th><th>Pool</th><th>Status</th><th>Slots</th><th>Slot</th><th>Agent</th><th></th><th></th></tr></thead>
+      <tbody>${nodes.length ? nodes.map(nodeRow).join("") : `<tr><td colspan="8" class="muted">No nodes yet: start a dtp-node, or add one by name ahead of it.</td></tr>`}</tbody></table></div>
+    <h3>Groups <button class="small" id="cfg-addgroup">＋ group</button> <span class="hint">named sets of users; the rules below refer to them. Membership is edited on the users.</span></h3>
+    <div style="overflow-x:auto"><table><thead><tr><th>Group</th><th>Description</th><th>Members</th><th></th><th></th></tr></thead>
+      <tbody>${groups.length ? groups.map(groupRow).join("") : `<tr><td colspan="5" class="muted">No groups.</td></tr>`}</tbody></table></div>
+    <h3>Users <button class="small" id="cfg-adduser">＋ user</button> <span class="hint">identities slots are charged to; a user may be in several groups. Someone who submits without being listed is simply a user in no group.</span></h3>
+    <div style="overflow-x:auto"><table><thead><tr><th>User</th><th>Display name</th><th>Email</th><th>Groups</th><th></th><th></th></tr></thead>
+      <tbody>${users.length ? users.map(userRow).join("") : `<tr><td colspan="6" class="muted">No users listed.</td></tr>`}</tbody></table></div>
+    <h3>Quota rules <button class="small" id="cfg-addrule">＋ rule</button> <span class="hint">who × where → max concurrent slots. "Each user" limits every user the subject covers separately, "all together" their slots added up. Per scope the most specific each-user rule governs a user (own › group, most permissive › everyone); every "together" rule that covers them applies on top; anywhere / pool / node rules are all enforced. 0 forbids; no rule, no limit.</span></h3>
+    <div style="overflow-x:auto"><table><thead><tr><th>Who</th><th>Name</th><th>Counted</th><th>Where</th><th>Target</th><th>Max slots</th><th>Note</th><th></th><th></th></tr></thead>
+      <tbody>${rules.length ? rules.map(ruleRow).join("") : `<tr><td colspan="9" class="muted">No rules: nobody is limited.</td></tr>`}</tbody></table></div>
+    <datalist id="groupnames">${groupNames.map(n=>`<option value="${esc(n)}">`).join("")}</datalist>
+    <datalist id="usernames">${userNames.map(n=>`<option value="${esc(n)}">`).join("")}</datalist>`;
+  bindConfig(groups, users, nodes, rules);
+}
+
+const stripNew = p => { const q = Object.assign({}, p); delete q._new; return q; };
+const ruleKeyOf = r => `${r.subject}${r.name?":"+r.name:""}${r.together?"/together":""}@${r.scope}${r.target?":"+r.target:""}`;
+const listOf = s => s.split(",").map(x=>x.trim()).filter(Boolean);
+const numOr0 = v => parseInt(v) || 0;
+
+function bindConfig(groups, users, nodes, rules){
+  const $ = id => document.getElementById(id), cfgRoot = $("cfg");
+  $("cfg-reload").onclick = async () => {
+    const r = await fetch("/api/v1/config/reload", { method: "POST" });
+    if (!r.ok) { alert("reload: " + ((await r.json()).error || r.statusText)); return; }
+    await loadConfig();
+  };
+  $("cfg-addpool").onclick = () => { cfgState.pools.push({_new:true, name:"", runtime:"container", default:{}}); renderConfig(); };
+  $("cfg-addnode").onclick = () => { cfgState.nodes = cfgState.nodes||[]; cfgState.nodes.push({_new:true, name:"", pool:""}); renderConfig(); };
+  $("cfg-addgroup").onclick = () => { cfgState.groups = cfgState.groups||[]; cfgState.groups.push({_new:true, name:""}); renderConfig(); };
+  $("cfg-addrule").onclick = () => { cfgState.quotas = cfgState.quotas||[]; cfgState.quotas.push({_new:true, subject:"global", scope:"global"}); renderConfig(); };
+  $("cfg-adduser").onclick = () => { cfgState.users = cfgState.users||[]; cfgState.users.push({_new:true, name:""}); renderConfig(); };
+  const status = (tr, cls, text) => { const st = tr.querySelector(".st-cell"); st.className = "st-cell "+cls; st.textContent = text; };
+  // send applies one row's change; the editor is re-rendered from the stored
+  // catalog afterwards, and the row's status survives that by name.
+  const send = async (tr, method, url, body) => {
+    status(tr, "", "saving…");
+    const kind = Object.keys(tr.dataset).find(k => k.startsWith("cfg"));
+    const ident = t => kind === "cfgrule" ? (t.dataset.key || "") : (t.querySelector("[data-f=name]")?.value.trim() || "");
+    const name = kind === "cfgrule" && body && body.subject ? ruleKeyOf(body) : ident(tr);
+    const r = await fetch(url, { method, headers:{"Content-Type":"application/json"}, body: body===undefined?undefined:JSON.stringify(body) });
+    if (!r.ok) { status(tr, "err", (await r.json()).error || r.statusText); return false; }
+    await loadConfig();
+    const again = [...cfgRoot.querySelectorAll(`tr[data-${kind}]`)].find(t => ident(t) === name);
+    if (again) status(again, "ok", method === "DELETE" ? "removed" : "applied");
+    return true;
+  };
+  cfgRoot.querySelectorAll("tr[data-cfgpool]").forEach(tr=>{
+    const i = +tr.dataset.cfgpool, base = stripNew(cfgState.pools[i]);
+    const v = f => tr.querySelector(`[data-f="${f}"]`).value.trim();
+    const fromRow = () => Object.assign({}, base, {
+      name: v("name"), runtime: v("runtime"), task_driver: v("task_driver"), description: v("description"),
+      spans: listOf(v("spans")),
+      default: Object.assign({}, base.default||{}, { image: v("image"), command: v("command") ? v("command").split(/\s+/) : [] }) });
+    tr.querySelector("[data-save]").onclick = () => { const p = fromRow(); if (!p.name) { status(tr,"err","name required"); return; } send(tr, "PUT", `/api/v1/config/pools/${encodeURIComponent(p.name)}`, p); };
+    tr.querySelector("[data-json]").onclick = () => { const jr = tr.nextElementSibling; jr.hidden = !jr.hidden; };
+    const jr = tr.nextElementSibling;
+    jr.querySelector("[data-savejson]").onclick = () => {
+      let p; try { p = JSON.parse(jr.querySelector("textarea").value); } catch (e) { status(tr, "err", "json: "+e.message); return; }
+      if (!p.name) { status(tr,"err","name required"); return; }
+      send(tr, "PUT", `/api/v1/config/pools/${encodeURIComponent(p.name)}`, p);
+    };
+    const del = tr.querySelector("[data-del]");
+    if (del) del.onclick = () => { if (confirm(`Delete pool ${base.name}?`)) send(tr, "DELETE", `/api/v1/config/pools/${encodeURIComponent(base.name)}`); };
+  });
+  cfgRoot.querySelectorAll("tr[data-cfggroup]").forEach(tr=>{
+    const g = groups[+tr.dataset.cfggroup];
+    const v = f => tr.querySelector(`[data-f="${f}"]`).value.trim();
+    tr.querySelector("[data-save]").onclick = () => {
+      const name = v("name"); if (!name) { status(tr,"err","name required"); return; }
+      send(tr, "PUT", `/api/v1/config/groups/${encodeURIComponent(name)}`, { name, description: v("description") });
+    };
+    const del = tr.querySelector("[data-del]");
+    if (del) del.onclick = () => { if (confirm(`Delete group ${g.name}? Its members stay (minus this membership); its quota rules go with it.`)) send(tr, "DELETE", `/api/v1/config/groups/${encodeURIComponent(g.name)}`); };
+  });
+  cfgRoot.querySelectorAll("tr[data-cfgrule]").forEach(tr=>{
+    const i = +tr.dataset.cfgrule, r = cfgState.quotas[i];
+    const el = f => tr.querySelector(`[data-f="${f}"]`), v = f => el(f).value.trim();
+    // Subject and scope selectors re-render the row so the name/target
+    // fields fit the kind chosen.
+    const sync = () => { Object.assign(r, { subject: v("subject"), name: v("name"), together: !!v("together"), scope: v("scope"), target: v("target"),
+      max_slots: el("max_slots").value === "" ? undefined : numOr0(v("max_slots")), note: v("note") });
+      if (r.subject === "global") { r.name = ""; } if (r.subject === "user") { r.together = false; } if (r.scope === "global") { r.target = ""; } };
+    el("subject").onchange = el("scope").onchange = () => { sync(); renderConfig(); };
+    tr.querySelector("[data-save]").onclick = () => {
+      sync();
+      if (r.subject !== "global" && !r.name) { status(tr,"err","name required"); return; }
+      if (r.scope !== "global" && !r.target) { status(tr,"err","target required"); return; }
+      if (r.max_slots === undefined) { status(tr,"err","max slots required (0 forbids)"); return; }
+      const body = { subject: r.subject, name: r.name, together: r.together, scope: r.scope, target: r.target, max_slots: r.max_slots, note: r.note };
+      const key = tr.dataset.key || ruleKeyOf(body);
+      send(tr, "PUT", `/api/v1/config/quotas/${encodeURI(key)}`, body);
+    };
+    const del = tr.querySelector("[data-del]");
+    if (del) del.onclick = () => { if (confirm(`Delete rule ${tr.dataset.key}?`)) send(tr, "DELETE", `/api/v1/config/quotas/${encodeURI(tr.dataset.key)}`); };
+  });
+  cfgRoot.querySelectorAll("tr[data-cfgnode]").forEach(tr=>{
+    const n = nodes[+tr.dataset.cfgnode];
+    const v = f => tr.querySelector(`[data-f="${f}"]`).value.trim();
+    tr.querySelector("[data-save]").onclick = () => {
+      const name = v("name"); if (!name) { status(tr,"err","name required"); return; }
+      send(tr, "PUT", `/api/v1/config/nodes/${encodeURIComponent(name)}`, { name, pool: v("pool") });
+    };
+    const del = tr.querySelector("[data-del]");
+    if (del) del.onclick = () => { if (confirm(`Forget node ${n.name}? It comes back unassigned on its next heartbeat.`)) send(tr, "DELETE", `/api/v1/config/nodes/${encodeURIComponent(n.name)}`); };
+  });
+  cfgRoot.querySelectorAll("tr[data-cfguser]").forEach(tr=>{
+    const u = users[+tr.dataset.cfguser];
+    const v = f => tr.querySelector(`[data-f="${f}"]`).value.trim();
+    tr.querySelector("[data-save]").onclick = () => {
+      const name = v("name"); if (!name) { status(tr,"err","name required"); return; }
+      send(tr, "PUT", `/api/v1/config/users/${encodeURIComponent(name)}`, { name, display_name: v("display_name"), email: v("email"), groups: listOf(v("groups")) });
+    };
+    const del = tr.querySelector("[data-del]");
+    if (del) del.onclick = () => { if (confirm(`Delete user ${u.name}?`)) send(tr, "DELETE", `/api/v1/config/users/${encodeURIComponent(u.name)}`); };
+  });
+}
+
 poll();
 </script>
 </body>

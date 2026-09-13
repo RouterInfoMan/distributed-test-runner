@@ -3,48 +3,27 @@
   "state_dir": "/var/lib/dtp",
   "public_url": "http://master:8080",
   "backend": "nomad",
+  "store": {
+    "driver": "postgres",
+    "dsn": "postgres://dtp:dtp-s3cret@postgres:5432/dtp?sslmode=disable"
+  },
+  "templates_dir": "/etc/dtp/templates",
   "default_timeout": "20m",
   "default_retries": 0,
-
   "nomad": {
     "address": "http://nomad-server:4646",
-    "datacenters": ["dc1"]
+    "datacenters": [
+      "dc1"
+    ]
   },
-
   "s3": {
     "endpoint": "http://minio:9000",
     "public_url": "http://127.0.0.1:9000",
     "region": "us-east-1",
     "bucket": "dtp",
+    "builds_bucket": "builds",
     "access_key": "dtpadmin",
     "secret_key": "dtpadmin123"
   },
-
-  "pools": [
-    {
-      "name": "linux-container",
-      "description": "Headless RCP under Xvfb, one container per suite",
-      "runtime": "container",
-      "task_driver": "docker",
-      "slot": { "cpu": 500, "memory": 512, "disk": 512 },
-      "cache_dir": "/tmp/dtp-nomad/cache",
-      "docker_network": "dtp_default",
-      "default": {
-        "image": "dtp/rcp-runner:dev",
-        "command": ["/opt/dtp/run-suite.sh"]
-      }
-    },
-    {
-      "name": "linux-process",
-      "description": "Task directory + process cgroup on a provisioned node",
-      "runtime": "process",
-      "task_driver": "raw_exec",
-      "slot": { "cpu": 500, "memory": 512, "disk": 512 },
-      "cache_dir": "/var/lib/dtp/cache",
-      "runner_command": ["/usr/local/bin/dtp-runner"],
-      "default": {
-        "command": ["/opt/dtp/run-suite.sh"]
-      }
-    }
-  ]
+  "//": "Pools, node assignments, groups, users and quota rules are not here: they live in PostgreSQL (deploy/sql/010_seed_catalog.sql seeds the demo lab at first init). Slot counts and sizes live on the nodes (deploy/nodes/*.yaml). See README > Pools, nodes and quotas."
 }

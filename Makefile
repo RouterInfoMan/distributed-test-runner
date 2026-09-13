@@ -2,16 +2,17 @@ SHELL := /bin/bash
 BIN   := bin
 COMPOSE := docker compose -f deploy/docker-compose.yml
 
-.PHONY: help build test smoke fmt vet demo demo-stop stack stack-build stack-stop stack-logs submit clean
+.PHONY: help build test smoke fmt vet demo demo-stop stack stack-build stack-stop stack-logs submit egit clean
 
 help:
-	@echo "build        compile dtp, dtp-master, dtp-runner into ./$(BIN)"
+	@echo "build        compile dtp, dtp-master, dtp-runner, dtp-node into ./$(BIN)"
 	@echo "test         run unit tests"
 	@echo "demo         local backend: MinIO in docker + master on the host (no Nomad)"
 	@echo "demo-stop    tear the local demo down"
 	@echo "stack        full stack: Nomad cluster + MinIO + master in docker compose"
 	@echo "stack-stop   tear the full stack down"
 	@echo "submit       submit examples/regression.json and follow it"
+	@echo "egit         build EGit with Tycho, publish the payload, run its test modules"
 	@echo "smoke        end-to-end assertions against a running master"
 
 build:
@@ -45,6 +46,7 @@ stack:
 	@echo "dashboard  http://localhost:8080"
 	@echo "nomad ui   http://localhost:4646"
 	@echo "minio      http://localhost:9001  (dtpadmin / dtpadmin123)"
+	@echo "postgres   psql postgres://dtp:dtp-s3cret@localhost:5433/dtp"
 
 stack-build:
 	$(COMPOSE) build
@@ -57,6 +59,11 @@ stack-logs:
 
 submit: build
 	$(BIN)/dtp submit examples/regression.json -w
+
+# EGIT_REF=<tag> picks the release; see scripts/build-egit.sh for the knobs.
+# The submission asks the build repository for the newest egit payload.
+egit: build
+	./scripts/build-egit.sh >/dev/null && $(BIN)/dtp submit examples/egit.json -w
 
 clean: demo-stop
 	rm -rf $(BIN) .dtp

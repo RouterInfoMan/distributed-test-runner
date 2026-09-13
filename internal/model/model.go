@@ -68,18 +68,26 @@ const (
 // BuildArtifact is one payload fetched onto the node and unpacked into the
 // content-addressed build cache. Reused across every suite that names the same
 // sha256, so a 400MB RCP product is downloaded once per node per build.
+//
+// A submission names the payload either by repository id (ID, or "latest" of
+// a Product) - the master fills URL, SHA256, Unpack and Version from the
+// build's manifest - or by URL (+ sha256) directly.
 type BuildArtifact struct {
-	Name   string `json:"name"`             // cache/dir name, e.g. "product"
-	URL    string `json:"url"`              // http(s):// or s3://bucket/key
-	SHA256 string `json:"sha256,omitempty"` // required for caching; verified on fetch
-	Unpack string `json:"unpack,omitempty"` // "", "zip", "tar.gz", "tar", "auto"
+	Name    string `json:"name"`              // cache/dir name, e.g. "product"; DTP_BUILD_<NAME> on the node
+	ID      string `json:"id,omitempty"`      // repository id, e.g. "egit-b522e135e4", or "latest"
+	Product string `json:"product,omitempty"` // for "latest"; defaults to Name
+	URL     string `json:"url,omitempty"`     // http(s):// or s3://bucket/key
+	SHA256  string `json:"sha256,omitempty"`  // required for caching; verified on fetch
+	Unpack  string `json:"unpack,omitempty"`  // "", "zip", "tar.gz", "tar", "auto"
+	Version string `json:"version,omitempty"` // resolved from the manifest; DTP_BUILD_<NAME>_VERSION
+	Ref     string `json:"ref,omitempty"`     // tag or branch, from the manifest
 }
 
 // SuiteSpec is one Eclipse RCP test suite: the atomic unit of distribution.
 // A suite occupies exactly one slot on exactly one node for its whole run.
 type SuiteSpec struct {
 	Name     string            `json:"name"`
-	Pool     string            `json:"pool"`
+	Pool     string            `json:"pool,omitempty"`
 	Runtime  Runtime           `json:"runtime,omitempty"`
 	Image    string            `json:"image,omitempty"`    // container runtime only
 	Command  []string          `json:"command,omitempty"`  // overrides the pool default
@@ -107,6 +115,7 @@ type SuiteDefaults struct {
 type Submission struct {
 	RegressionID string            `json:"regression_id,omitempty"` // generated when empty
 	Name         string            `json:"name,omitempty"`
+	User         string            `json:"user,omitempty"`     // who is charged for the slots
 	Priority     int               `json:"priority,omitempty"` // higher runs first
 	Labels       map[string]string `json:"labels,omitempty"`
 	Defaults     SuiteDefaults     `json:"defaults,omitempty"`
@@ -160,11 +169,11 @@ func (s *Submission) Normalize() error {
 			return fmt.Errorf("suite %q: unknown runtime %q", su.Name, su.Runtime)
 		}
 		for j, b := range su.Build {
-			if b.URL == "" {
-				return fmt.Errorf("suite %q: build[%d] needs a url", su.Name, j)
-			}
 			if b.Name == "" {
 				return fmt.Errorf("suite %q: build[%d] needs a name", su.Name, j)
+			}
+			if b.URL == "" && b.ID == "" {
+				return fmt.Errorf("suite %q: build %q needs an id (or \"latest\") or a url", su.Name, b.Name)
 			}
 		}
 	}
@@ -204,6 +213,8 @@ func (su SuiteSpec) MaxAttempts() int {
 type Regression struct {
 	ID          string            `json:"id"`
 	Name        string            `json:"name"`
+	User        string            `json:"user,omitempty"`
+	Groups      []string          `json:"groups,omitempty"` // the user's groups at submission
 	Priority    int               `json:"priority"`
 	Labels      map[string]string `json:"labels,omitempty"`
 	State       RegressionState   `json:"state"`
@@ -211,6 +222,7 @@ type Regression struct {
 	StartedAt   *time.Time        `json:"started_at,omitempty"`
 	FinishedAt  *time.Time        `json:"finished_at,omitempty"`
 	Suites      []SuiteSpec       `json:"suites"`
+	Builds      []BuildArtifact   `json:"builds,omitempty"` // the resolved payloads, one per name
 	Totals      Totals            `json:"totals"`
 	ArtifactURI string            `json:"artifact_uri"`
 }
@@ -241,6 +253,8 @@ type Run struct {
 	Runtime      Runtime    `json:"runtime"`
 	State        RunState   `json:"state"`
 	Priority     int        `json:"priority"`
+	User         string     `json:"user,omitempty"`
+	Groups       []string   `json:"groups,omitempty"`
 	QueuedAt     time.Time  `json:"queued_at"`
 	DispatchedAt *time.Time `json:"dispatched_at,omitempty"`
 	StartedAt    *time.Time `json:"started_at,omitempty"`
@@ -303,6 +317,31 @@ type Case struct {
 // Runner contract
 // ---------------------------------------------------------------------------
 
+// Slot is the resource envelope of one test slot: what a pool sizes its
+// nodes by and what a suite may assume it has.
+type Slot struct {
+	// Cores reserves whole CPU cores (a cpuset) regardless of the node's clock
+	// speed - "2 cores per suite, whatever the machine". When set, CPU is
+	// ignored.
+	Cores  int `json:"cores,omitempty"`
+	CPU    int `json:"cpu,omitempty"` // MHz of compute, the alternative to Cores
+	Memory int `json:"memory"`        // MB reserved; the hard ceiling unless MemoryMax is set
+	Disk   int `json:"disk"`          // MB
+	// MemoryMax, when set, lets a task burst above Memory up to this ceiling
+	// (Nomad memory oversubscription). JVM-heavy suites reserve what they
+	// need steadily and borrow for GC spikes and WebKit helpers without the
+	// ledger reserving the peak for every slot.
+	MemoryMax int `json:"memory_max,omitempty"`
+}
+
+// String renders the envelope for humans: "2 cores/4096MB" or "1000MHz/4096MB".
+func (s Slot) String() string {
+	if s.Cores > 0 {
+		return fmt.Sprintf("%d cores/%dMB", s.Cores, s.Memory)
+	}
+	return fmt.Sprintf("%dMHz/%dMB", s.CPU, s.Memory)
+}
+
 // S3Target tells the runner where to push artifacts.
 type S3Target struct {
 	Endpoint  string `json:"endpoint"`
@@ -325,16 +364,18 @@ type RunSpec struct {
 	Command      []string          `json:"command"`
 	Env          map[string]string `json:"env,omitempty"`
 	Timeout      Duration          `json:"timeout"`
+	Slot         Slot              `json:"slot"` // exported as DTP_SLOT_* so a harness can size its JVMs
 	CacheDir     string            `json:"cache_dir"`
 	S3           S3Target          `json:"s3"`
 	MasterURL    string            `json:"master_url"`
 	Token        string            `json:"token"`
 }
 
-// RunEvent is what the runner POSTs back to the master.
+// RunEvent is what the runner POSTs back to the master. "progress" carries
+// the results parsed so far while the suite is still running.
 type RunEvent struct {
 	RunID     string    `json:"run_id"`
-	Phase     string    `json:"phase"` // "started" | "finished"
+	Phase     string    `json:"phase"` // "started" | "progress" | "finished"
 	State     RunState  `json:"state,omitempty"`
 	NodeID    string    `json:"node_id,omitempty"`
 	NodeName  string    `json:"node_name,omitempty"`
