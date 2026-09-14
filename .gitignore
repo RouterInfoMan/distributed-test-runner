@@ -1,3 +1,4 @@
 bin/
 .dtp/
 .nomad/
+.vscode
