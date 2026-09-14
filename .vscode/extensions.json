@@ -1,0 +1,9 @@
+{
+  // VS Code offers to install these when the folder is opened. The README and
+  // ARCHITECTURE.md use Mermaid diagrams, which the built-in Markdown preview
+  // does not render on its own.
+  "recommendations": [
+    "bierner.markdown-mermaid",
+    "bpruitt-goddard.mermaid-markdown-syntax-highlighting"
+  ]
+}
